@@ -17,6 +17,20 @@ import os
 # 让 spec 在任意工作目录下都能找到项目根
 HERE = os.path.dirname(os.path.abspath(SPEC))
 
+# Windows 版本资源（产品名/版本/厂商，资源管理器「详细信息」可见）
+VERSION_FILE = os.path.join(HERE, "version_info.txt")
+
+# 随包数据：**只带应用自己的图标**。
+# 注意不能整目录打包 ui/assets —— 开发机上若用 scripts/fetch_top_logos.py
+# 生成过 ui/assets/logos/（第三方游戏商标素材），整目录 glob 会把它们
+# 一起塞进发布包造成再分发。logo 一律在运行时从 Steam CDN 获取。
+ASSET_FILES = [
+    os.path.join(HERE, "ui", "assets", "app_logo.ico"),
+    os.path.join(HERE, "ui", "assets", "app_logo.png"),
+]
+APP_DATAS = [(p, os.path.join("ui", "assets")) for p in ASSET_FILES
+             if os.path.isfile(p)]
+
 block_cipher = None
 
 # 用不到的 Qt 模块。排除它们能显著缩小体积，
@@ -45,7 +59,8 @@ a = Analysis(
     binaries=[],
     # 应用图标（窗口图标 + 托盘图标）。打包后解到 _MEIPASS/ui/assets/，
     # 与开发时的 ui/assets/ 相对位置一致，_asset() 两条路径都能命中。
-    datas=[(os.path.join(HERE, "ui", "assets"), os.path.join("ui", "assets"))],
+    # 只带应用自己的图标，不带 ui/assets/logos/（第三方商标素材）。
+    datas=APP_DATAS,
     # zstandard 在 chunker.py 里是 try-import 的可选加速，
     # 显式声明一下，避免 PyInstaller 因为它是可选的而漏掉。
     hiddenimports=["zstandard"],
@@ -65,7 +80,7 @@ a_cli = Analysis(
     [os.path.join(HERE, "run_cli.py")],
     pathex=[HERE],
     binaries=[],
-    datas=[(os.path.join(HERE, "ui", "assets"), os.path.join("ui", "assets"))],
+    datas=APP_DATAS,
     hiddenimports=["zstandard"],
     hookspath=[],
     hooksconfig={},
@@ -101,6 +116,7 @@ exe_gui = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=VERSION_FILE,
     # exe 自身的图标（资源管理器里显示的那个）。
     # 窗口/托盘图标走的是 ui/assets，两者互不依赖。
     icon=os.path.join(HERE, "ui", "assets", "app_logo.ico"),
@@ -127,5 +143,6 @@ exe_cli = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=VERSION_FILE,
     icon=os.path.join(HERE, "ui", "assets", "app_logo.ico"),
 )

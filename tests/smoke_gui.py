@@ -6,8 +6,9 @@
      一进 QThreadPool 就抛 ProgrammingError，界面永久卡在忙碌状态。
   2. 后台任务失败不再弹模态框 —— 模态框会霸占事件循环把应用挂死。
   3. 本地备份模式默认不碰云端，开启云端后走完整同步链路。
-  4. 内置 logo 包：组合名（「荒野大镖客2 Red Dead Redemption 2」这类）
-     能命中真实 logo，且不触发联网请求。
+  4. 游戏图标：任何情况下 pixmap 都返回 96x96 图标不空白；
+     若装了可选离线 logo 包，组合名（「荒野大镖客2 Red Dead
+     Redemption 2」这类）能命中真实 logo 且不触发联网请求。
 
 跑法：
     QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
@@ -186,33 +187,47 @@ def main():
                       os.path.join(remote_root, "snapshots")) else 0
     check("云端已有快照", n_snaps >= 1, "snaps=%d" % n_snaps)
 
-    print("== 6. 内置 logo 包（组合名必须有真实 logo） ==")
-    from ui.logos import LogoService, _pack_lookup, _load_pack, _pack_dir
+    print("== 6. 游戏图标（logo 包可选：无包走预设/联网，有包走包） ==")
+    from ui.logos import (LogoService, _pack_lookup, _load_pack, _pack_dirs)
     from PySide6.QtGui import QPixmap
-    pngs = [f for f in os.listdir(_pack_dir()) if f.endswith(".png")]
-    check("logo 包图标数 >= 90（scripts/fetch_top_logos.py 产物）",
-          len(pngs) >= 90, "实际 %d" % len(pngs))
-    check("logo_pack.json 条目与图标一一对应",
-          len(_load_pack()) >= len(pngs),
-          "json=%d png=%d" % (len(_load_pack()), len(pngs)))
-    check("RDR2 组合名命中 appid 1174180",
-          _pack_lookup("荒野大镖客2 Red Dead Redemption 2") == "1174180",
-          repr(_pack_lookup("荒野大镖客2 Red Dead Redemption 2")))
-    check("纯英文名 GTA V 命中 271590", _pack_lookup("GTA V") == "271590")
-    check("短中文名+英文组合命中巫师3",
-          _pack_lookup("巫师3 The Witcher 3") == "292030")
-    check("不存在的游戏名返回 None",
+    # 合规默认：仓库/发布包不含任何第三方 logo。只有开发者或用户
+    # 自行用 scripts/fetch_top_logos.py 预取了包，这里才存在。
+    pack_dir = next((d for d in _pack_dirs()
+                     if os.path.isdir(d)
+                     and any(f.endswith(".png")
+                             for f in os.listdir(d))), None)
+    check("查不到的名字返回 None（无论装没装包）",
           _pack_lookup("这款游戏肯定不存在 XYZ") is None)
     ls = LogoService(os.path.join(TMP, "logocache_test"))
     pm = ls.pixmap("荒野大镖客2 Red Dead Redemption 2")
-    check("RDR2 取到 96x96 图标", pm is not None and pm.width() == 96,
+    check("任何情况下 pixmap 都返回 96x96 图标（不空白、不崩）",
+          pm is not None and pm.width() == 96,
           "w=%s" % (pm.width() if pm else None))
-    direct = QPixmap(os.path.join(_pack_dir(), "1174180.png"))
-    check("RDR2 图标就是内置包里的那个文件",
-          pm is not None and pm.toImage() == direct.toImage())
-    ls.request("荒野大镖客2 Red Dead Redemption 2")
-    check("包内已有的游戏不触发联网请求", not ls._pending,
-          "pending=%r" % (ls._pending,))
+
+    if pack_dir is None:
+        check("合规默认：未安装可选 logo 包", _load_pack() == {})
+        print("    （未安装可选 logo 包，包内匹配相关检查跳过；"
+              "需要时运行 scripts/fetch_top_logos.py 预取）")
+    else:
+        pngs = [f for f in os.listdir(pack_dir) if f.endswith(".png")]
+        check("logo 包图标数 >= 90（scripts/fetch_top_logos.py 产物）",
+              len(pngs) >= 90, "实际 %d" % len(pngs))
+        check("logo_pack.json 条目与图标一一对应",
+              len(_load_pack()) >= len(pngs),
+              "json=%d png=%d" % (len(_load_pack()), len(pngs)))
+        check("RDR2 组合名命中 appid 1174180",
+              _pack_lookup("荒野大镖客2 Red Dead Redemption 2") == "1174180",
+              repr(_pack_lookup("荒野大镖客2 Red Dead Redemption 2")))
+        check("纯英文名 GTA V 命中 271590",
+              _pack_lookup("GTA V") == "271590")
+        check("短中文名+英文组合命中巫师3",
+              _pack_lookup("巫师3 The Witcher 3") == "292030")
+        direct = QPixmap(os.path.join(pack_dir, "1174180.png"))
+        check("RDR2 图标就是离线包里的那个文件",
+              pm is not None and pm.toImage() == direct.toImage())
+        ls.request("荒野大镖客2 Red Dead Redemption 2")
+        check("包内已有且图片存在的游戏不触发联网请求", not ls._pending,
+              "pending=%r" % (ls._pending,))
 
     # --- 汇总 ---
     print()

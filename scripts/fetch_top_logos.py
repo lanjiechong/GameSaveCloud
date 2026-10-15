@@ -1,19 +1,27 @@
 # -*- coding: utf-8 -*-
-"""构建内置 logo 图标包（维护工具，非运行时代码）。
+"""构建离线 logo 图标包（维护工具，非运行时代码）。
+
+合规说明：
+    游戏 logo 的商标/版权归各游戏厂商所有。产物**不提交进仓库、
+    不进入发布包**（ui/assets/logos/ 已在 .gitignore 中，PyInstaller
+    spec 也只打包应用自身图标）。这个脚本只是方便开发者或用户在
+    **本机**预取一份离线 logo 包；程序本身在运行时也会自动从
+    Steam CDN 获取并缓存图标。
 
 数据来源：
     1. Steam 商店「全球销量榜」前 100（store.steampowered.com 搜索页
        filter=globaltopsellers，抓取时需翻墙或代理，见 README）
     2. 常青经典补充清单（SUPPLEMENT，当前不在周榜但装机量极大的游戏）
 
-产物（ui/assets/logos/）：
+产物（默认 ui/assets/logos/，可用 --out 改到用户包目录）：
     <appid>.png    96x96 圆角方块图标，烘焙规则与 ui/logos.py 的
                    _to_tile 完全一致（contain/cover + 圆角裁剪），
-                   保证内置图标与联网取到的图标视觉相同
+                   保证包内图标与联网取到的图标视觉相同
     logo_pack.json  appid -> 可匹配名称列表（官方中文名/英文名/俗名）
 
 用法：
     python scripts/fetch_top_logos.py [--ids top_ids.txt]
+    python scripts/fetch_top_logos.py --out "$env:LOCALAPPDATA\\GameSaveCloud\\logopack"
 
 依赖：Pillow（只在构建时需要，运行时不需要）。
 """
@@ -273,13 +281,21 @@ def scanner_game_names():
 # 主流程
 # ---------------------------------------------------------------
 def main():
+    global OUT_DIR, PACK_JSON
     ap = argparse.ArgumentParser()
     ap.add_argument("--ids", default=None,
                     help="销量榜 appid 列表文件（每行一个）")
+    ap.add_argument("--out", default=None,
+                    help="输出目录。默认开发目录 ui/assets/logos/（gitignore）；"
+                         "给所有用户使用可指到 %%LOCALAPPDATA%%\\GameSaveCloud\\logopack")
     ap.add_argument("--no-resume", action="store_true",
                     help="默认断点续传：已有 PNG 的条目直接沿用旧映射，"
                          "加此参数强制全部重新下载")
     args = ap.parse_args()
+
+    if args.out:
+        OUT_DIR = os.path.abspath(args.out)
+        PACK_JSON = os.path.join(OUT_DIR, "logo_pack.json")
 
     chart_ids = []
     if args.ids and os.path.isfile(args.ids):

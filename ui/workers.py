@@ -9,6 +9,13 @@ import traceback
 from PySide6.QtCore import QObject, QRunnable, Signal, QThreadPool
 
 
+class OperationCancelled(Exception):
+    """用户点了「取消」，由进度回调在工作线程内主动抛出。
+
+    在文件粒度中止：当前正在处理的那个文件走完，下一个文件开始前停。
+    """
+
+
 class WorkerSignals(QObject):
     progress = Signal(str, int, int)      # 阶段, 当前, 总计
     log = Signal(str)

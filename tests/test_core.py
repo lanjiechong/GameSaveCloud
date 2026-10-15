@@ -31,7 +31,8 @@ from gamesave.models import (Game, Snapshot, FileEntry, ChunkRef,
                              SYNC_SYNCED, SYNC_LOCAL_AHEAD, SYNC_UNKNOWN,
                              SYNC_ERROR)
 from gamesave.store import ChunkStore
-from gamesave.vault import Vault
+from gamesave.vault import Vault, safe_join, UnsafePathError
+from gamesave import secret
 from gamesave.remote import LocalFolderBackend
 from gamesave.sync import SyncEngine
 from gamesave.sync import (ACT_UPLOAD, ACT_DOWNLOAD, ACT_NONE, ACT_DEL_LOCAL,
@@ -658,6 +659,154 @@ class TestLocalOnlyMode(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.save_dir, "a.sav")), b"good")
         st = self.engine.status(self.game)
         self.assertEqual(st.state, SYNC_SYNCED)
+
+
+# ==================================================================
+# 10. 安全：快照路径不允许逃出存档根
+# ==================================================================
+def self_tmpdir():
+    if not hasattr(self_tmpdir, "_d"):
+        self_tmpdir._d = tempfile.mkdtemp(prefix="gsc_safe_")
+    return self_tmpdir._d
+
+
+class TestSafeJoin(unittest.TestCase):
+    def test_normal_and_nested(self):
+        base = os.path.join(self_tmpdir(), "root")
+        self.assertEqual(safe_join(base, "a.sav"),
+                         os.path.join(base, "a.sav"))
+        self.assertEqual(safe_join(base, "sub/deep/a.sav"),
+                         os.path.join(base, "sub", "deep", "a.sav"))
+        # 目标尚不存在也必须能校验（还原时要新建目录）
+        self.assertTrue(safe_join(base, "newdir/a.sav")
+                        .startswith(base + os.sep))
+
+    def test_dotdot_traversal_blocked(self):
+        base = os.path.join(self_tmpdir(), "root")
+        with self.assertRaises(UnsafePathError):
+            safe_join(base, "../../evil.sav")
+        with self.assertRaises(UnsafePathError):
+            safe_join(base, "sub/../../evil.sav")
+
+    def test_drive_absolute_blocked(self):
+        # 盘符绝对路径不能把 root 顶掉
+        with self.assertRaises(UnsafePathError):
+            safe_join(r"C:\Games\saves", r"C:\Windows\evil.sav")
+
+    def test_restore_refuses_traversal_snapshot(self):
+        """端到端：篡改快照清单注入 ../，回滚必须整体拒绝且不落任何文件。"""
+        tmp = tempfile.mkdtemp(prefix="gsc_trav_")
+        try:
+            vault = Vault(os.path.join(tmp, "vault"))
+            save_dir = os.path.join(tmp, "FakeGame", "saves")
+            os.makedirs(save_dir, exist_ok=True)
+            g = vault.add_game("FakeGame", [save_dir])
+            write(os.path.join(save_dir, "a.sav"), b"v1")
+            snap = vault.create_snapshot(g)
+            evil_target = os.path.join(tmp, "evil.sav")
+            snap.files.append(FileEntry(
+                path="../../evil.sav", sha256="deadbeef", size=4,
+                mtime=0.0, chunks=[]))
+            vault._write_snapshot(snap)
+            with self.assertRaises(UnsafePathError):
+                vault.restore_snapshot(g, snap.id)
+            self.assertFalse(os.path.exists(evil_target))
+            vault.close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ==================================================================
+# 11. 状态刷新快速路径（quick_hint 复用旧 FileEntry）
+# ==================================================================
+class TestQuickScan(BaseSyncTest):
+    def test_unchanged_file_reuses_hint_without_reread(self):
+        p = os.path.join(self.save_dir, "a.sav")
+        write(p, b"v1-content")
+        snap = self.vault.create_snapshot(self.game)
+        hint = {e.path: e for e in snap.files}
+        # size+mtime 未变：直接复用，sha 与 hint 一致
+        entries = self.vault.scan_local(self.game, quick_hint=hint)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].sha256, hint["a.sav"].sha256)
+        self.assertEqual(entries[0].chunks, hint["a.sav"].chunks)
+
+    def test_size_change_ignores_hint(self):
+        p = os.path.join(self.save_dir, "a.sav")
+        write(p, b"v1")
+        snap = self.vault.create_snapshot(self.game)
+        hint = {e.path: e for e in snap.files}
+        write(p, b"v2-but-longer")
+        entries = self.vault.scan_local(self.game, quick_hint=hint)
+        self.assertNotEqual(entries[0].sha256, hint["a.sav"].sha256)
+
+    def test_same_size_sneaky_edit_caught_by_exact_scan(self):
+        """Cemu 式篡改：内容变了但 size 没变、还把 mtime 伪造回去。
+
+        快速扫描会被这种手法骗过（这是明确的取舍：mtime 不可信），
+        但真正的 plan() 走全量精算，必须发现差异 —— 同步决策
+        永远以内容哈希为准。
+        """
+        p = os.path.join(self.save_dir, "a.sav")
+        write(p, b"AAAA")
+        snap = self.vault.create_snapshot(self.game)
+        hint = {e.path: e for e in snap.files}
+        st = os.stat(p)
+        write(p, b"BBBB")
+        os.utime(p, (st.st_atime, st.st_mtime))
+        quick = self.vault.scan_local(self.game, quick_hint=hint)
+        self.assertEqual(quick[0].sha256, hint["a.sav"].sha256)  # 被骗过
+        exact = self.vault.scan_local(self.game)
+        self.assertNotEqual(exact[0].sha256, hint["a.sav"].sha256)
+
+    def test_missing_chunk_disables_reuse(self):
+        """hint 引用的 chunk 已不在 store 里时不能复用，否则状态会撒谎。"""
+        p = os.path.join(self.save_dir, "a.sav")
+        write(p, b"v1-content")
+        snap = self.vault.create_snapshot(self.game)
+        hint = {e.path: e for e in snap.files}
+        os.remove(self.vault.store.path_of(hint["a.sav"].chunks[0].sha256))
+        entries = self.vault.scan_local(self.game, quick_hint=hint)
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(self.vault.store.has(entries[0].chunks[0].sha256))
+
+
+# ==================================================================
+# 12. 凭据加密（Windows 走 DPAPI）
+# ==================================================================
+class TestSecret(unittest.TestCase):
+    def test_roundtrip(self):
+        token = secret.encrypt("p@ssw0rd-坚果云")
+        if secret.is_dpapi_available():
+            self.assertTrue(token.startswith(secret.PREFIX_DPAPI))
+        self.assertNotIn("p@ssw0rd", token)      # 落盘串里看不到明文
+        self.assertEqual(secret.decrypt(token), "p@ssw0rd-坚果云")
+
+    def test_empty_passthrough(self):
+        self.assertEqual(secret.encrypt(""), "")
+        self.assertEqual(secret.decrypt(""), "")
+
+    def test_legacy_plaintext_still_readable(self):
+        # 旧版本裸明文必须还能读出来，不能把用户锁在门外
+        self.assertEqual(secret.decrypt("old-plain-password"),
+                         "old-plain-password")
+
+    def test_b64_fallback_roundtrip(self):
+        token = secret.PREFIX_B64 + "YWJj"
+        self.assertEqual(secret.decrypt(token), "abc")
+
+
+# ==================================================================
+# 13. 快照清单原子写（不留 .tmp 残骸）
+# ==================================================================
+class TestAtomicSnapshotWrite(BaseSyncTest):
+    def test_no_tmp_left_behind(self):
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap = self.vault.create_snapshot(self.game)
+        tmp = os.path.join(self.vault.snapshots_dir, snap.id + ".json.tmp")
+        self.assertFalse(os.path.exists(tmp))
+        self.assertTrue(os.path.exists(
+            os.path.join(self.vault.snapshots_dir, snap.id + ".json")))
 
 
 if __name__ == "__main__":

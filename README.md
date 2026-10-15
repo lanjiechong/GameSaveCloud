@@ -7,6 +7,8 @@
 
 **当前版本 v1.0.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
+**许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
 **本地备份为主，云备份为可选项。** 开箱即用，不配任何云端也能完整工作：
 备份、历史版本、回滚、冲突检测全部在本地完成。只有在设置里勾选「启用云端同步」
 并填好位置后，才会把存档同步到本地目录 / 移动硬盘 / NAS / WebDAV。
@@ -26,6 +28,15 @@ GameSaveCloud-CLI.exe    命令行版，供计划任务 / 脚本调用
 
 两个都是**单文件**，拷到任何一台 Windows 机器上都能直接跑。
 数据存放在 `%LOCALAPPDATA%\GameSaveCloud\`，换机器用只需把 exe 拷过去。
+
+**校验下载物**（建议）：Release 页面会附上每个 exe 的 SHA256，下载后本地核对：
+
+```powershell
+Get-FileHash .\GameSaveCloud.exe -Algorithm SHA256
+```
+
+exe 当前未做代码签名（个人开发者暂无证书），首次运行若被 SmartScreen 拦截，
+点「更多信息 → 仍要运行」即可；哈希一致就说明文件未被篡改。
 
 也可以从源码自行构建（产物在 `dist/`）：
 
@@ -57,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 47 个核心引擎单元测试
+python tests/test_core.py                                # 60 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -72,9 +83,11 @@ pyinstaller GameSaveCloud.spec --noconfirm --clean
 
 `GameSaveCloud.spec` 里排除了约 30 个确定用不到的 Qt 模块
 （WebEngine / 3D / Quick / Multimedia / 蓝牙 / 定位等），
-两个 exe 各 46 MB 左右。排除列表是保守的：QtWidgets 运行时会拉
+两个 exe 各 50 MB 左右。排除列表是保守的：QtWidgets 运行时会拉
 QtGui / QtCore / QtNetwork / QtOpenGL / QtPrintSupport，这些都不排。
-`ui/assets/`（应用图标）通过 spec 的 `datas` 一起打进去。
+spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
+不打包 `ui/assets/logos/` —— 第三方游戏 logo 只在运行时从 Steam CDN
+获取，避免商标素材随安装包再分发（见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）。
 
 
 ---
@@ -104,14 +117,16 @@ QtGui / QtCore / QtNetwork / QtOpenGL / QtPrintSupport，这些都不排。
 │  main_window.py           主窗口、队列式同步编排                │
 │  dialogs.py               确认 / 冲突 / 历史 / 差异 / 设置      │
 │  game_list.py             游戏列表自绘委托（图标+两行文字）      │
-│  logos.py                 游戏图标五级保障 + Steam 联网检索      │
+│  logos.py                 图标逐级保障 + Steam 联网检索          │
 │  workers.py               QRunnable + QThreadPool，信号回传     │
 │  theme.py                配色与样式表                          │
-│  assets/                  应用图标（PNG + 多尺寸 ICO）           │
-│  assets/logos/            内置 logo 包（Top100 真实图标 + 映射） │
+│  assets/                  仅应用自己的图标（PNG + 多尺寸 ICO）   │
+│  assets/logos/            第三方 logo 不入库（gitignore，       │
+│                           运行时从 Steam CDN 拉取并缓存）       │
 ├───────────────────────────────────────────────────────────────┤
 │  scripts/                 维护工具（非运行时代码）               │
-│  fetch_top_logos.py       抓 Steam 销量榜、下载烘焙内置 logo 包  │
+│  fetch_top_logos.py       本机可选预取离线 logo 包（不分发）     │
+│  check_licenses.py        发布前依赖许可证自查                  │
 ├───────────────────────────────────────────────────────────────┤
 │  version.py               版本号（发版只改这里，配合 git tag）   │
 │  run.py / run_cli.py      入口：GUI / 命令行                    │
@@ -527,34 +542,40 @@ CLI测试        1 文件 14 B
 `status()` / `plan()` 在该标志为 False 时**不调用任何远端原语**
 （单元测试用一个「一被调用就抛 AssertionError」的后端来守住这条边界）。
 
-### 10.3 游戏图标：五级保障
+### 10.3 游戏图标：逐级保障 + 商标合规
 
 左侧列表每款游戏都有一个图标，来源按优先级：
 
 ```
 1. 磁盘缓存     %LOCALAPPDATA%/GameSaveCloud/logocache/<md5>.png
                 —— 第二次启动直接用，离线也有图
-2. 内置 logo 包 ui/assets/logos/<appid>.png
-                —— Steam 全球周销量榜 Top100 + 常青经典的 93 款真实 logo，
-                   烘焙成 96px 圆角方块随应用分发，断网、首启即有图
-                   （未发售新游 CDN 无 logo 资产，取不到的走后面几级）
+2. 可选离线包   %LOCALAPPDATA%/GameSaveCloud/logopack/<appid>.png
+                —— 用户自行安装的离线 logo 包，默认不存在
 3. 内置预设     logos.py 的 BUILTIN 表，约 90 款热门游戏
                 （配色 + 短代号，离线立刻可画，断网也不会空白）
 4. 联网检索     以上都没命中再走 Steam 公开接口，见下
 5. 占位兜底     首字母色块，与真实图标同尺寸同圆角
 ```
 
-**为什么要有「内置 logo 包」这一层**（实测踩出来的坑）：
+**商标合规**：游戏 logo 的版权归各游戏厂商所有，所以仓库和发布包
+**不再内置任何第三方 logo** —— 真实图标一律在运行时从 Steam 公共 CDN
+获取并缓存在用户本机（指示性使用，仅用于标识对应游戏）。
+`scripts/fetch_top_logos.py` 仍保留，但只是开发者/用户在**本机**预取
+离线包的工具，产物目录 `ui/assets/logos/` 已被 `.gitignore` 排除，
+spec 也不会把它打进 exe。想要离线即有真实图标，可把预取产物放到
+`%LOCALAPPDATA%\GameSaveCloud\logopack\`（或开发时直接生成到
+`ui/assets/logos/`）。
+
+**为什么不能只靠联网检索**（实测踩出来的坑）：
 
 扫描器给游戏起的是「中文俗名 英文名」组合名（`荒野大镖客2 Red Dead Redemption 2`），
 而 Steam 搜索只认官方名 —— 整个组合名丢进 `storesearch` **一个结果都返回不了**
 （实测：`term=荒野大镖客2 Red Dead Redemption 2` → 空；
-单独搜 `Red Dead Redemption 2` → 1174180）。只靠联网检索，
-热门游戏拿不到图、离线更是一片占位色块。所以把 Top100 的真实 logo
-直接打包进应用：`scripts/fetch_top_logos.py` 从 Steam 抓榜 → 下载 → 烘焙 → 生成
-`logo_pack.json`（appid → 官方中文名/英文名/俗名列表）。
+单独搜 `Red Dead Redemption 2` → 1174180）。所以联网检索前会拆出英文部分
+优先搜（`_search_terms`）；热门游戏第一次启动联网取到图后即进缓存，
+离线包则为完全断网的机器提供可选补充。
 
-**内置包的名字匹配**（`_pack_lookup`，四轮从严到宽，天然兼容组合名）：
+**离线包的名字匹配**（`_pack_lookup`，四轮从严到宽，天然兼容组合名）：
 
 ```
 1. 整个名字精确命中            「GTA V」→ 271590
@@ -590,12 +611,15 @@ CLI测试        1 文件 14 B
 - **`QThreadPool.start()` 不持 Python 侧引用。** worker 若被 GC，
   `logo_ready` 永远发不出来。`LogoService` 自己维护了一份强引用表。
 
-**更新内置 logo 包**（可选，需要能访问 Steam 商店）：
+**本机预取离线 logo 包**（可选，需要能访问 Steam 商店；产物不提交、不分发）：
 
 ```powershell
 # 抓当前周销量榜前 100（store.steampowered.com 搜索页，国内需代理）
 # 把 appid 每行一个存成 top_ids.txt，然后：
 python scripts/fetch_top_logos.py --ids top_ids.txt
+# 默认输出到开发目录 ui/assets/logos/（gitignore，仅本机调试用）；
+# 想让日常使用的程序也加载，输出到用户包目录：
+python scripts/fetch_top_logos.py --ids top_ids.txt --out "$env:LOCALAPPDATA\GameSaveCloud\logopack"
 ```
 
 脚本只依赖 Pillow（构建期），运行时不依赖；已有图标不会重复下载。
@@ -629,4 +653,28 @@ N 个条目就是 N 套 layout，窗口缩放时全部重新布局，
 - 加密同步（端到端）未实现。云端目录是明文 chunk，
   放在 NAS / 移动硬盘上请自行做磁盘级加密。
 - exe 未做代码签名，首次运行可能被 SmartScreen 拦一下，
-  点「更多信息 → 仍要运行」即可。
+  点「更多信息 → 仍要运行」即可；下载后建议用 Release 页面的
+  SHA256 核对文件完整性。
+
+---
+
+## 12. 许可证与声明
+
+**本项目代码：[MIT License](LICENSE)**，Copyright (c) 2026 lanjiechong。
+可自由使用、修改、再分发（包括商业用途），唯须保留版权与许可声明。
+
+**第三方组件**（PySide6/Qt 为 LGPL-3.0、zstandard 为 BSD-3-Clause、
+Python 运行时为 PSF）的完整声明、动态链接合规说明与 Qt 可替换要约，
+见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+发布前可用 `python scripts/check_licenses.py` 自查依赖许可证清单。
+
+**游戏名称与图标**：各游戏名称、logo、商标的版权归其各自所有者所有，
+与本项目不存在授权、赞助或关联关系；程序仅在运行时从 Steam 公开接口
+获取图标用于标识对应游戏，不再分发任何第三方素材。
+
+**关于 AI 辅助开发的说明**：本项目在开发过程中使用了 AI 编程助手
+参与代码编写与问题排查。需求取舍、架构设计、安全模型（留底机制、
+三方合并基准、内容哈希判定等）与最终代码均由人类作者审阅、测试并负责；
+全部核心行为由 `tests/test_core.py` 的 60 个单元测试钉住。如发现任何
+疑似侵权内容，请在 [Issues](https://github.com/lanjiechong/GameSaveCloud/issues)
+反馈，核实后立即处理。

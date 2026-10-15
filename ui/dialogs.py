@@ -418,7 +418,8 @@ class SettingsDialog(QDialog):
         f1.addRow("WebDAV 地址", self.dav_url)
         self.dav_user = QLineEdit(d["remote"]["user"])
         f1.addRow("账号", self.dav_user)
-        self.dav_pass = QLineEdit(d["remote"]["password"])
+        # 显示的是内存中解密的密码；配置文件里只保存 DPAPI 密文
+        self.dav_pass = QLineEdit(cfg.get_remote_password())
         self.dav_pass.setEchoMode(QLineEdit.Password)
         f1.addRow("密码 / 应用授权码", self.dav_pass)
         lay.addWidget(g1)
@@ -449,6 +450,9 @@ class SettingsDialog(QDialog):
         self.sched_silent = QCheckBox("静默同步（不弹窗，只在日志记录）")
         self.sched_silent.setChecked(d["schedule"]["silent"])
         f3.addRow("", self.sched_silent)
+        self.autostart = QCheckBox("开机时自动启动（最小化到系统托盘）")
+        self.autostart.setChecked(bool(d["schedule"].get("autostart")))
+        f3.addRow("", self.autostart)
         lay.addWidget(g3)
 
         # 安全
@@ -466,12 +470,28 @@ class SettingsDialog(QDialog):
         f4.addRow("", self.confirm_danger)
         lay.addWidget(g4)
 
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        lay.addWidget(btns)
+        self._btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self._btns.accepted.connect(self._validate_accept)
+        self._btns.rejected.connect(self.reject)
+        lay.addWidget(self._btns)
         self.cloud_on.toggled.connect(self._toggle_backend)
         self._toggle_backend()
+
+    def _validate_accept(self):
+        """确定前的硬性校验。当前只有一条：启用 WebDAV 且用 http:// 时
+        明确警告账号密码与存档会明文传输，需二次确认。"""
+        if (self.cloud_on.isChecked()
+                and self.backend.currentData() == "webdav"
+                and self.dav_url.text().strip().lower().startswith("http://")):
+            r = QMessageBox.warning(
+                self, "明文连接警告",
+                "WebDAV 地址是 http:// 而非 https://。\n\n"
+                "账号、密码以及存档内容都将以明文在网络上传输，"
+                "同一网络中的其他人可以截获。\n\n确定仍要使用这个地址吗？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if r != QMessageBox.Yes:
+                return
+        self.accept()
 
     def _toggle_backend(self):
         enabled = self.cloud_on.isChecked()
@@ -499,14 +519,27 @@ class SettingsDialog(QDialog):
         c.set("remote.path", self.remote_path.text().strip())
         c.set("remote.url", self.dav_url.text().strip())
         c.set("remote.user", self.dav_user.text().strip())
-        c.set("remote.password", self.dav_pass.text())
+        # 密码走 DPAPI 加密后再落盘，config.json 里不留明文
+        c.set_remote_password(self.dav_pass.text())
         c.set("vault_root", self.vault.text().strip())
         c.set("schedule.enabled", self.sched_on.isChecked())
         c.set("schedule.interval_minutes", self.sched_min.value())
         c.set("schedule.silent", self.sched_silent.isChecked())
+        # 开机自启：同步 HKCU Run 项；非 Windows 平台 set_enabled 返回 False
+        want_autostart = self.autostart.isChecked()
+        c.set("schedule.autostart",
+              want_autostart and self._apply_autostart(want_autostart))
         c.set("safety.keep_local_copy", self.keep_copy.isChecked())
         c.set("safety.keep_snapshots", self.keep_snaps.value())
-        c.set("safety.confirm_dangerous", self.confirm_danger.isChecked())
+        c.set("safety.confirm_dangerous", self.confirm_dangerous.isChecked())
+
+    @staticmethod
+    def _apply_autostart(on: bool) -> bool:
+        try:
+            from . import autostart
+            return autostart.set_enabled(on)
+        except Exception:
+            return False
 
 
 class _Wrap(QWidget):

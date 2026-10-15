@@ -8,6 +8,8 @@ import json
 import os
 import sys
 
+from . import secret
+
 DEFAULT_VAULT_NAME = "GameSaveVault"
 DEFAULT_REMOTE_NAME = "GameSaveCloud"
 
@@ -38,6 +40,10 @@ class Config:
                 "path": os.path.join(self.base, DEFAULT_REMOTE_NAME),
                 "url": "",
                 "user": "",
+                # 密码只存 DPAPI 密文（见 gamesave/secret.py），
+                # 读写请走 get_remote_password() / set_remote_password()，
+                # 不要直接碰这两个键。password 仅为兼容旧配置的遗留明文。
+                "password_enc": "",
                 "password": "",
             },
             "schedule": {
@@ -45,6 +51,7 @@ class Config:
                 "interval_minutes": 60,
                 "silent": True,                    # 静默同步：不弹窗，只记日志
                 "auto_scan_on_start": True,
+                "autostart": False,                # 开机自启（写 HKCU Run 项）
             },
             "safety": {
                 "keep_local_copy": True,           # 覆盖/回滚前自动留底
@@ -54,6 +61,23 @@ class Config:
             "window": {"width": 1100, "height": 720},
         }
         self.load()
+        self._migrate_plaintext_password()
+
+    def _migrate_plaintext_password(self):
+        """把旧版 config.json 里的明文 WebDAV 密码就地转成 DPAPI 密文。
+
+        只迁移一次；转换后把明文键清空并落盘。DPAPI 不可用（非 Windows）
+        时退化为 base64，同样不再保留裸明文。
+        """
+        r = self.data["remote"]
+        if r.get("password") and not r.get("password_enc"):
+            try:
+                r["password_enc"] = secret.encrypt(r["password"])
+                r["password"] = ""
+                self.save()
+            except Exception:
+                # 加密失败就保留原状，至少不影响应用启动
+                pass
 
     # ---------- 读写 ----------
     def load(self):
@@ -87,6 +111,23 @@ class Config:
     @property
     def remote_conf(self) -> dict:
         return self.data["remote"]
+
+    def get_remote_password(self) -> str:
+        """取 WebDAV 明文密码（内存中解密），不落日志、不进 UI 文案。"""
+        r = self.data["remote"]
+        if r.get("password_enc"):
+            try:
+                return secret.decrypt(r["password_enc"])
+            except Exception:
+                # 例如密文是在另一台机器/另一个用户下生成的
+                return ""
+        return r.get("password", "") or ""
+
+    def set_remote_password(self, plaintext: str):
+        """设置密码：加密后存 password_enc，明文键始终清空。"""
+        r = self.data["remote"]
+        r["password_enc"] = secret.encrypt(plaintext or "")
+        r["password"] = ""
 
     @property
     def cloud_enabled(self) -> bool:

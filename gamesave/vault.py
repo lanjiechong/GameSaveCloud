@@ -56,6 +56,28 @@ def new_id(seed: str) -> str:
     return hashlib.sha1(("%s|%f" % (seed, time.time())).encode("utf-8")).hexdigest()[:16]
 
 
+class UnsafePathError(Exception):
+    """快照内相对路径试图逃逸出存档根目录（含 ``..`` 或盘符等）。
+
+    远端快照清单属于不可信输入（WebDAV 服务器可能被攻陷，或走明文
+    http 被中间人篡改），不能让其中的路径把文件写到存档目录之外。
+    """
+
+
+def safe_join(root: str, rel: str) -> str:
+    """把快照内相对路径（``/`` 分隔）拼到 root 下，并保证结果不逃出 root。
+
+    目标文件允许尚不存在（realpath 只做词法归一化），所以新建目录
+    场景一样能校验。越界（含 ``..`` 回溯、盘符绝对路径等）抛
+    UnsafePathError。
+    """
+    base = os.path.realpath(root)
+    dst = os.path.realpath(os.path.join(base, rel.replace("/", os.sep)))
+    if dst != base and not dst.startswith(base + os.sep):
+        raise UnsafePathError("快照路径越出存档根目录: %s" % rel)
+    return dst
+
+
 class _LockedDB:
     """给 sqlite3.Connection 套一把锁，让它能被多个线程共用。
 
@@ -175,12 +197,22 @@ class Vault:
     # ==========================================================
     # 快照：扫描 + 分块 + 去重落盘
     # ==========================================================
-    def scan_local(self, game: Game, progress_cb=None) -> list:
+    def scan_local(self, game: Game, progress_cb=None, quick_hint=None) -> list:
         """扫描本地存档目录，返回 FileEntry 列表（chunks 已写入本地 store）。
 
         虚拟根规则：多个存档目录时，路径前缀为 `目录序号/`，保证无损还原。
+
+        quick_hint: {相对路径: 上一次快照里的 FileEntry}。给定时走快速
+            路径 —— 文件 size 与 mtime 都没变（容差 2 秒）且引用的 chunk
+            在本地 store 里都还在，就直接复用旧 FileEntry，**完全不读文件
+            内容、不算哈希、不压缩**。状态刷新每小时跑一次、每次开机也跑，
+            全量重算对几十上百 MB 的存档是无谓的 IO+CPU。
+            注意：mtime 不可信（Cemu 虚拟时钟），所以快速路径只能用于
+            「展示状态」，真正的同步计划 SyncEngine.plan() 仍然全量精算，
+            判定依据永远是内容哈希。
         """
         entries = []
+        quick_hint = quick_hint or {}
         total_files = 0
         for p in game.paths:
             if os.path.isfile(p):
@@ -209,12 +241,24 @@ class Vault:
                     st = os.stat(full)
                 except OSError:
                     continue
-                chunks, file_sha = chunker.chunk_file(full)
-                for c in chunks:
-                    self.store.put(c["sha256"], c["blob"])
-                entries.append(FileEntry(
-                    path=rel, sha256=file_sha, size=st.st_size, mtime=st.st_mtime,
-                    chunks=[ChunkRef(sha256=c["sha256"], size=c["size"]) for c in chunks]))
+                hint = quick_hint.get(rel)
+                # 快速路径：size/mtime 未变且 chunk 实体都在，直接复用旧记录，
+                # 不读文件内容。mtime 给 2 秒容差，兼容不同文件系统的时间粒度。
+                if (hint is not None and hint.size == st.st_size
+                        and abs(hint.mtime - st.st_mtime) <= 2.0
+                        and hint.chunks
+                        and all(self.store.has(c.sha256) for c in hint.chunks)):
+                    entries.append(FileEntry(
+                        path=rel, sha256=hint.sha256, size=st.st_size,
+                        mtime=st.st_mtime, chunks=list(hint.chunks)))
+                else:
+                    chunks, file_sha = chunker.chunk_file(full)
+                    for c in chunks:
+                        self.store.put(c["sha256"], c["blob"])
+                    entries.append(FileEntry(
+                        path=rel, sha256=file_sha, size=st.st_size, mtime=st.st_mtime,
+                        chunks=[ChunkRef(sha256=c["sha256"], size=c["size"])
+                                for c in chunks]))
                 done += 1
                 if progress_cb:
                     progress_cb(done, max(total_files, 1))
@@ -248,9 +292,14 @@ class Vault:
                     "INSERT OR IGNORE INTO chunk_refs(sha,snapshot_id) VALUES(?,?)",
                     (c.sha256, snap.id))
         self.db.commit()
-        with open(os.path.join(self.snapshots_dir, snap.id + ".json"), "w",
-                  encoding="utf-8") as f:
+        # 清单同样原子写：先写 .tmp 再 replace，避免进程被杀 / 断电时
+        # 留下半截 JSON（list_snapshots 会逐个 json.load，坏文件会让该
+        # 游戏的云端快照列表永久缺一份）。
+        sp = os.path.join(self.snapshots_dir, snap.id + ".json")
+        stmp = sp + ".tmp"
+        with open(stmp, "w", encoding="utf-8") as f:
             json.dump(snap.to_dict(), f, ensure_ascii=False, indent=1)
+        os.replace(stmp, sp)
 
     def get_snapshot(self, sid: str) -> Snapshot:
         p = os.path.join(self.snapshots_dir, sid + ".json")
@@ -379,15 +428,17 @@ class Vault:
         return roots
 
     def _resolve_target(self, roots: list, rel: str):
+        """虚拟根路径解析。陈旧的序号前缀（超出当前目录数）返回 None 跳过；
+        序号有效但路径试图越界则抛 UnsafePathError，不静默写出去。"""
         if len(roots) == 1:
-            return os.path.join(roots[0], rel.replace("/", os.sep))
+            return safe_join(roots[0], rel)
         parts = rel.split("/", 1)
         if len(parts) != 2 or not parts[0].isdigit():
             return None
         idx = int(parts[0])
         if idx >= len(roots):
             return None
-        return os.path.join(roots[idx], parts[1].replace("/", os.sep))
+        return safe_join(roots[idx], parts[1])
 
     def _backup_existing(self, game_id: str, rel: str, src: str, reason: str):
         stamp = time.strftime("%Y%m%d_%H%M%S")

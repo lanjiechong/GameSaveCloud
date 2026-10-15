@@ -26,6 +26,9 @@ def main():
     if "--cli" in args:
         return _cli(args[args.index("--cli") + 1:])
 
+    # --minimized：开机自启时用，主窗口不弹出，只留托盘图标
+    start_hidden = "--minimized" in args
+
     from PySide6.QtWidgets import QApplication
     from ui.main_window import MainWindow
 
@@ -33,8 +36,9 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(VERSION)
     app.setQuitOnLastWindowClosed(False)
-    w = MainWindow()
-    w.show()
+    w = MainWindow(start_hidden=start_hidden)
+    if not start_hidden:
+        w.show()
     return app.exec()
 
 
@@ -61,7 +65,8 @@ def _cli(argv):
     if cloud_on:
         r = cfg.remote_conf
         if r.get("type") == "webdav" and r.get("url"):
-            remote = WebDAVBackend(r["url"], r.get("user", ""), r.get("password", ""))
+            remote = WebDAVBackend(r["url"], r.get("user", ""),
+                                   cfg.get_remote_password())
         else:
             remote = LocalFolderBackend(r.get("path"))
     eng = SyncEngine(vault, remote, log=lambda m: print("  " + m),

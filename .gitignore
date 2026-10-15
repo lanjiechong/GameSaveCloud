@@ -19,6 +19,12 @@ dist/
 logocache/
 *.log
 
+# 第三方游戏 logo 包（商标素材，不随仓库再分发）。
+# 构建/开发时可运行 scripts/fetch_top_logos.py 在本机生成，
+# 或运行程序后由 Steam CDN 自动缓存；用户也可自行把包放到
+# %LOCALAPPDATA%\GameSaveCloud\logopack\。
+ui/assets/logos/
+
 # 系统 / 编辑器
 .DS_Store
 Thumbs.db

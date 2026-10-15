@@ -2,16 +2,21 @@
 """
 游戏图标（logo）加载服务。
 
-五级保障，任何一层失败都不会出现空白、破图或布局错位：
+逐级保障，任何一层失败都不会出现空白、破图或布局错位：
 
     1. 已下载缓存    磁盘缓存命中 → 直接返回，离线也能用
-    2. 内置 logo 包   Steam 全球周销量榜 Top100 + 常青经典（约 130 款）
-                     的真实 logo，烘焙成 96px 圆角方块随应用分发，
-                      断网、首次启动即有图，不等请求
+    2. 可选 logo 包  用户自行安装到本机的离线 logo 包
+                     （%LOCALAPPDATA%\\GameSaveCloud\\logopack\\，
+                     或开发目录 ui/assets/logos/，两者都可缺省）。
+                     **仓库与发布包不含任何第三方游戏 logo** —— 商标素材
+                     只在运行时从 Steam CDN 获取，不在本项目里再分发。
     3. 内置预设      其余常见游戏有预置配色与代号，**立刻可画**
     4. 联网检索      都没命中再走 Steam 公开接口找真实 logo
     5. 占位兜底      全部失败时画一个「首字母色块」，
                      尺寸、圆角、位置与真实图标完全一致
+
+（逻辑上仍是上面 5 层，只是第 2 层的 logo 包从「随程序内置」改为
+「用户可选安装」，因此全新安装、零配置时走的是 1→3→4→5。）
 
 图标来源（联网那一层）：
     Steam 商店搜索 API（免密钥）
@@ -27,9 +32,11 @@
 关于名字：扫描器给游戏起的是「中文俗名 英文名」组合名
 （如「荒野大镖客2 Red Dead Redemption 2」），而 Steam 只认官方名，
 整个组合名丢进去搜不到任何东西。所以联网检索会拆出英文部分优先搜；
-内置 logo 包则用「精确 / 包含 / 分词」四级名字匹配，天然兼容组合名。
+可选离线 logo 包则用「精确 / 包含 / 分词」四级名字匹配，天然兼容组合名。
 
-内置 logo 包的构建：scripts/fetch_top_logos.py（维护工具，需联网+Pillow）。
+可选离线 logo 包的构建：scripts/fetch_top_logos.py（维护工具，需联网+Pillow，
+产物默认写到开发目录 ui/assets/logos/，已被 .gitignore 排除；
+也可加 --out 输出到 %LOCALAPPDATA%\\GameSaveCloud\\logopack\\）。
 
 所有网络 IO 都在工作线程里跑，主线程只收信号。
 """
@@ -137,14 +144,29 @@ NEUTRAL = ["#5b6b7c", "#6b7a8f", "#4f6d7a", "#7a6b5b", "#5f7a5f",
 
 
 # ---------------------------------------------------------------
-# 内置 logo 包（scripts/fetch_top_logos.py 生成，随应用分发）
+# 可选离线 logo 包（scripts/fetch_top_logos.py 生成，不随仓库/发布包分发）
 # ---------------------------------------------------------------
-def _pack_dir() -> str:
-    """logo 包目录。开发时在 ui/assets/logos/，PyInstaller 打包后在 _MEIPASS。"""
+def _user_pack_dir() -> str:
+    """用户自行安装的离线 logo 包目录（跨开发版/打包版都生效）。"""
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        base = os.path.expanduser("~")
+    return os.path.join(base, "GameSaveCloud", "logopack")
+
+
+def _pack_dirs() -> list:
+    """logo 包候选目录，按优先级排列；不存在的目录由调用方跳过。
+
+    1. 用户目录 %LOCALAPPDATA%/GameSaveCloud/logopack（用户自己装的包）
+    2. 打包目录 _MEIPASS/ui/assets/logos（私有构建可选烘焙）
+    3. 开发目录 ui/assets/logos（fetch_top_logos.py 默认产物，gitignore）
+    """
+    dirs = [_user_pack_dir()]
     if getattr(sys, "_MEIPASS", None):
-        return os.path.join(sys._MEIPASS, "ui", "assets", "logos")
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "assets", "logos")
+        dirs.append(os.path.join(sys._MEIPASS, "ui", "assets", "logos"))
+    dirs.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "assets", "logos"))
+    return dirs
 
 
 _PACK = None          # {"<appid>": ["名1", "名2", ...]}，懒加载
@@ -152,31 +174,38 @@ _PACK_INDEX = None    # 归一化名 -> appid，精确命中用
 
 
 def _load_pack():
-    """读 logo_pack.json。文件不存在或损坏时静默按空包处理。"""
+    """读所有候选目录里的 logo_pack.json 并合并。
+
+    用户目录的包优先（同名 appid 以先加载的为准）；任何一个包缺失
+    或损坏都静默跳过，零配置时返回空包，后续走联网检索。
+    """
     global _PACK, _PACK_INDEX
     if _PACK is not None:
         return _PACK
     _PACK, _PACK_INDEX = {}, {}
-    try:
-        with open(os.path.join(_pack_dir(), "logo_pack.json"),
-                  encoding="utf-8") as f:
-            data = json.load(f)
+    for d in _pack_dirs():
+        try:
+            with open(os.path.join(d, "logo_pack.json"),
+                      encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
         for appid, ent in (data.get("games") or {}).items():
             names = [n for n in (ent.get("names") or []) if n]
             if not names:
                 continue
-            _PACK[appid] = names
+            _PACK.setdefault(appid, [])
             for n in names:
+                if n not in _PACK[appid]:
+                    _PACK[appid].append(n)
                 k = _norm(n)
                 if k and k not in _PACK_INDEX:
                     _PACK_INDEX[k] = appid
-    except Exception:
-        _PACK, _PACK_INDEX = {}, {}
     return _PACK
 
 
 def _pack_lookup(name: str):
-    """在内置 logo 包里按名字找 appid，找不到返回 None。
+    """在已安装的离线 logo 包里按名字找 appid，找不到返回 None。
 
     游戏名可能是「中文俗名 英文名」的组合（扫描器就这么起名的），
     所以按四轮找，从严到宽：
@@ -288,7 +317,7 @@ class LogoService(QObject):
         if disk is not None:
             self._pixmaps[key] = disk
             return disk
-        # 2. 内置 logo 包（销量榜 Top100 + 常青经典，真实 logo 离线可用）
+        # 2. 可选 logo 包（用户自行安装，真实 logo 离线可用；没装就跳过）
         packed = self._load_pack_pixmap(name)
         if packed is not None:
             self._pixmaps[key] = packed
@@ -297,15 +326,18 @@ class LogoService(QObject):
         return self._draw_builtin(name)
 
     def _load_pack_pixmap(self, name: str):
-        """按名字从内置 logo 包里取图；包里没有返回 None。"""
+        """按名字从可选 logo 包里取图；没装包或包里没有都返回 None。"""
         appid = _pack_lookup(name)
         if not appid:
             return None
-        p = os.path.join(_pack_dir(), "%s.png" % appid)
-        if not os.path.isfile(p):
-            return None
-        pm = QPixmap(p)
-        return pm if not pm.isNull() else None
+        for d in _pack_dirs():
+            p = os.path.join(d, "%s.png" % appid)
+            if not os.path.isfile(p):
+                continue
+            pm = QPixmap(p)
+            if not pm.isNull():
+                return pm
+        return None
 
     def request(self, name: str):
         """请求联网图标。已缓存/包内已有/正在请求/已知失败的直接跳过。"""
@@ -314,8 +346,12 @@ class LogoService(QObject):
             return
         if key in self._pixmaps:
             return
-        if _pack_lookup(name):
-            # 内置 logo 包里已经有这款的真实 logo，没必要联网。
+        appid = _pack_lookup(name)
+        if appid and any(os.path.isfile(os.path.join(d, "%s.png" % appid))
+                         for d in _pack_dirs()):
+            # 已安装的 logo 包里确实有这款的真实图片，没必要联网。
+            # 只命中索引但图片文件缺失（包不完整）时不能跳过，
+            # 否则这款游戏永远没机会联网取图。
             # 不跳过的话，一次联网失败还会把 key 记进 _failed，
             # 反而把「本来离线就有图」的状态搅乱。
             return

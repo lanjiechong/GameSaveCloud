@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """创建 GitHub Release 并上传 exe 资产。token 从环境变量读，不打印。"""
+import hashlib
 import json
 import os
 import sys
@@ -30,11 +31,19 @@ BODY = """## GameSaveCloud v1.0.0
 - **历史与回滚**：快照清单、内容查看、逐文件 diff、一键回滚（回滚前自动留底）；默认保留最近 30 个快照
 - **云端同步（可选）**：本地文件夹 / WebDAV 两种后端；本地与云端同时改动时弹窗交人决策（保留本地 / 使用云端 / 两边各存一份），绝不静默二选一
 - **调度**：定时自动备份、托盘常驻、可选开机自启
-- **游戏图标**：内置 Steam 全球周销量榜 Top100 + 常青经典 93 款真实 logo，断网首启即有图
+- **游戏图标**：运行时从 Steam 公开 CDN 获取并缓存（不内置第三方商标素材），
+  离线时显示程序自绘的配色图标
+
+### 校验下载物
+
+本 Release 未做代码签名。下载后请核对 SHA256（见下方「文件校验值」，
+由发布脚本对 dist 中的 exe 实时计算），一致即说明文件未被篡改。
+首次运行若被 SmartScreen 拦截，点「更多信息 → 仍要运行」。
 
 ### 质量保障
 
-- 47 个单元测试覆盖引擎层（分块去重 / 快照 / 同步 / 冲突策略）
+- 60 个单元测试覆盖引擎层（分块去重 / 快照 / 同步 / 冲突策略 /
+  路径安全 / 凭据加密）
 - GUI 冒烟测试（离屏）：后台线程 SQLite、8 线程并发读、对话框构造、本地/云端两条同步链路
 - 危险操作（回滚、覆盖、删除）一律二次确认，默认取消
 
@@ -45,7 +54,32 @@ pyinstaller GameSaveCloud.spec --noconfirm
 ```
 
 完整变更记录见 [CHANGELOG.md](https://github.com/lanjiechong/GameSaveCloud/blob/main/CHANGELOG.md)。
+
+### 文件校验值（SHA256）
+
+```
+__HASHES__
+```
 """
+
+
+def sha256_of(path, buf=1 << 20):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(buf), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def build_body():
+    """对 dist 里的两个 exe 实时计算 SHA256，填进 Release 说明。"""
+    lines = []
+    for name in ("GameSaveCloud.exe", "GameSaveCloud-CLI.exe"):
+        p = os.path.join(DIST, name)
+        if os.path.isfile(p):
+            lines.append("%s\n%s" % (sha256_of(p), name))
+    return BODY.replace("__HASHES__", "\n".join(lines) if lines
+                        else "（未在 dist/ 找到 exe，跳过）")
 
 
 def api(url, method="GET", data=None, headers=None, timeout=120):
@@ -80,10 +114,12 @@ def main():
     if not TOKEN:
         print("ERROR: GSC_GH_TOKEN 未设置")
         return 1
-    # 已存在则复用
+    body = build_body()
+    # 已存在则复用（但更新说明，确保 SHA256 与当前 dist 里的 exe 一致）
     try:
         rel = api("https://api.github.com/repos/%s/releases/tags/%s" % (REPO, TAG))
         print("Release 已存在，复用 id=%s" % rel.get("id"))
+        rel = api(rel["url"], "PATCH", {"body": body})
     except urllib.error.HTTPError as e:
         if e.code != 404:
             print("查询失败: HTTP %s" % e.code)
@@ -91,7 +127,7 @@ def main():
         rel = api("https://api.github.com/repos/%s/releases" % REPO, "POST", {
             "tag_name": TAG,
             "name": "GameSaveCloud v1.0.0 —— 游戏存档备份与同步",
-            "body": BODY,
+            "body": body,
             "draft": False,
             "prerelease": False,
         })

@@ -17,6 +17,7 @@
 """
 import os
 import sys
+import threading
 import time
 
 from PySide6.QtCore import Qt, QTimer, QSize
@@ -33,7 +34,7 @@ from .theme import PALETTE, STYLESHEET, state_color, state_bg, state_label
 from .dialogs import (ConfirmDialog, ConflictDialog, AddGameDialog,
                       HistoryDialog, DiffDialog, SettingsDialog, AboutDialog,
                       _fmt, _human)
-from .workers import run_async
+from .workers import run_async, OperationCancelled
 from .game_list import GameItemDelegate, ROLE_GAME, ROLE_STATUS, ROLE_CLOUD
 from .logos import LogoService
 from gamesave.config import Config
@@ -63,13 +64,18 @@ def _app_icon() -> QIcon:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, start_hidden=False):
         super().__init__()
         from version import APP_NAME, APP_TAGLINE, VERSION
+        self.start_hidden = bool(start_hidden)
         self.setWindowTitle("%s v%s —— %s" % (APP_NAME, VERSION, APP_TAGLINE))
         self.resize(1120, 760)
         self.setStyleSheet(STYLESHEET)
         self.setWindowIcon(_app_icon())
+
+        # 「取消」按钮的取消信号。Event 可跨线程 is_set() 轮询；
+        # 每次开始新任务时在 _set_busy(True) 里 clear。
+        self._cancel_event = threading.Event()
 
         self.cfg = Config()
         self.vault = Vault(self.cfg.vault_root)
@@ -106,7 +112,8 @@ class MainWindow(QMainWindow):
             return None
         r = self.cfg.remote_conf
         if r.get("type") == "webdav" and r.get("url"):
-            return WebDAVBackend(r["url"], r.get("user", ""), r.get("password", ""))
+            return WebDAVBackend(r["url"], r.get("user", ""),
+                                 self.cfg.get_remote_password())
         return LocalFolderBackend(r.get("path") or os.path.join(
             self.cfg.base, "GameSaveCloud"))
 
@@ -432,6 +439,9 @@ class MainWindow(QMainWindow):
     # ==========================================================
     def _set_busy(self, on, msg=""):
         self.busy = on
+        if on:
+            # 新一轮任务开始，清掉上一轮可能残留的取消标记
+            self._cancel_event.clear()
         for b in (self.b_backup, self.b_sync, self.b_add, self.b_refresh,
                   self.b_history, self.b_files, self.b_sync_one, self.b_remove):
             b.setEnabled(not on)
@@ -444,8 +454,30 @@ class MainWindow(QMainWindow):
             self._log(msg)
 
     def cancel_current(self):
-        self._cancelled = True
+        self._cancel_event.set()
+        self.b_stop.setEnabled(False)
         self._log("已请求取消（当前文件处理完后停止）")
+
+    # ---------- 取消 / 进度 / 错误的统一处理（都可能在工作线程被调） ----------
+    def _check_cancel(self):
+        if self._cancel_event.is_set():
+            raise OperationCancelled()
+
+    def _task_progress(self, sig, phase, cur, tot):
+        # 进度回调是任务循环中唯一的「天然检查点」，取消在这里抛出，
+        # 保证中止粒度是文件级而不是等整个任务跑完。
+        self._check_cancel()
+        sig.progress.emit(phase, cur, tot)
+
+    def _op_error(self, e, silent=False):
+        """工作线程失败的统一落点：取消不算错误，其余按前台/后台区分。"""
+        self._set_busy(False)
+        if isinstance(e, OperationCancelled) or "OperationCancelled" in str(e):
+            self._log("操作已取消，现场已保留，可随时重新执行。")
+        elif silent:
+            self._err_bg(e)
+        else:
+            self._err(e)
 
     def _err(self, e):
         """用户主动触发的操作失败 —— 弹模态框。
@@ -479,8 +511,9 @@ class MainWindow(QMainWindow):
         def job(sig):
             return self.vault.create_snapshot(g, kind="manual",
                                               note="手动备份",
-                                              progress_cb=lambda c, t: sig.progress.emit(
-                                                  "备份 %s" % g.name, c, t))
+                                              progress_cb=lambda c, t:
+                                                  self._task_progress(
+                                                      sig, "备份 %s" % g.name, c, t))
 
         def done(snap):
             self._log("备份完成：%d 个文件 / %s" % (len(snap.files), _human(snap.total_size)))
@@ -496,7 +529,7 @@ class MainWindow(QMainWindow):
                                        _human(snap.total_size), tail))
 
         run_async(job, on_result=done, on_progress=self._on_progress,
-                  on_error=lambda e: (self._set_busy(False), self._err(e)))
+                  on_error=lambda e: self._op_error(e))
 
     def _on_progress(self, phase, cur, tot):
         if tot > 0:
@@ -561,6 +594,11 @@ class MainWindow(QMainWindow):
         self._backup_next()
 
     def _backup_next(self):
+        if self._cancel_event.is_set():
+            self._set_busy(False)
+            self._log("备份已取消，已完成的部分不受影响。")
+            self.refresh_all()
+            return
         if not self._backup_queue:
             self._set_busy(False)
             self._log("全部本地备份完成")
@@ -574,7 +612,8 @@ class MainWindow(QMainWindow):
         def job(sig):
             return self.vault.create_snapshot(
                 g, kind="auto", note="本地备份",
-                progress_cb=lambda c, t: sig.progress.emit("备份 %s" % g.name, c, t))
+                progress_cb=lambda c, t:
+                    self._task_progress(sig, "备份 %s" % g.name, c, t))
 
         def done(snap):
             self._log("%s 已备份：%d 个文件 / %s"
@@ -583,9 +622,8 @@ class MainWindow(QMainWindow):
             self._backup_next()
 
         run_async(job, on_result=done, on_progress=self._on_progress,
-                  on_error=lambda e: (self._set_busy(False),
-                                      self._err_bg(e) if self._backup_silent
-                                      else self._err(e)))
+                  on_error=lambda e: self._op_error(
+                      e, silent=self._backup_silent))
 
     def _sync_games(self, games, silent=False):
         self._set_busy(True, "开始同步 %d 款游戏…" % len(games))
@@ -594,6 +632,11 @@ class MainWindow(QMainWindow):
         self._sync_next()
 
     def _sync_next(self):
+        if self._cancel_event.is_set():
+            self._set_busy(False)
+            self._log("同步已取消，已完成的部分均已落盘，未推进基准的下次重试。")
+            self.refresh_all()
+            return
         if not self._sync_queue:
             self._set_busy(False)
             self._log("全部同步完成")
@@ -604,14 +647,16 @@ class MainWindow(QMainWindow):
         g = self._sync_queue.pop(0)
 
         def job(sig):
+            self._check_cancel()
             plan = self.engine.plan(g)
             if plan.error:
                 return g, plan, None, plan.error
             if plan.has_conflict:
                 return g, plan, None, "conflict"
-            res = self.engine.execute(g, plan, {},
-                                      progress_cb=lambda stage, p: sig.progress.emit(
-                                          "%s %s" % (stage, g.name), 0, 0))
+            res = self.engine.execute(
+                g, plan, {},
+                progress_cb=lambda stage, p: self._task_progress(
+                    sig, "%s %s" % (stage, g.name), 0, 0))
             return g, plan, res, ""
 
         def done(res):
@@ -639,7 +684,7 @@ class MainWindow(QMainWindow):
             self._sync_next()
 
         run_async(job, on_result=done, on_progress=self._on_progress,
-                  on_error=lambda e: (self._set_busy(False), self._err(e)))
+                  on_error=lambda e: self._op_error(e))
 
     def _handle_conflicts(self, g, plan):
         dlg = ConflictDialog(g.name, plan.conflicts, self)
@@ -691,7 +736,7 @@ class MainWindow(QMainWindow):
                   "本地保险库的 localcopies/ 留底。\n%s"
                   % (g.name, _fmt(snap.created_at), _fmt(snap.created_at),
                      len(snap.files), _human(snap.total_size), push))
-        if not ConfirmDialog.ask(
+        if self.cfg.safety.get("confirm_dangerous", True) and not ConfirmDialog.ask(
                 "回滚存档 —— %s" % g.name,
                 "此操作会用旧版本覆盖当前存档，属于不可逆操作。",
                 detail, require_check=True, parent=self):
@@ -699,10 +744,9 @@ class MainWindow(QMainWindow):
         self._set_busy(True, "正在回滚…")
 
         def job(sig):
-            return self.vault.restore_snapshot(g, snap.id,
-                                               safety=self.cfg.safety["keep_local_copy"],
-                                               progress_cb=lambda c, t: sig.progress.emit(
-                                                   "回滚", c, t))
+            return self.vault.restore_snapshot(
+                g, snap.id, safety=self.cfg.safety["keep_local_copy"],
+                progress_cb=lambda c, t: self._task_progress(sig, "回滚", c, t))
 
         def done(st):
             self._log("回滚完成：还原 %d 个文件，覆盖前留底 %d 个"
@@ -716,7 +760,7 @@ class MainWindow(QMainWindow):
                                                          _human(st["bytes"]), st["backed_up"]))
 
         run_async(job, on_result=done, on_progress=self._on_progress,
-                  on_error=lambda e: (self._set_busy(False), self._err(e)))
+                  on_error=lambda e: self._op_error(e))
 
     # ---------- 查看文件 ----------
     def show_files(self):
@@ -780,11 +824,12 @@ class MainWindow(QMainWindow):
         g = self.current_game()
         if not g:
             return
-        if not ConfirmDialog.ask("移除游戏 —— %s" % g.name,
-                                 "将从列表移除该游戏，已备份的快照与 chunk 会保留在保险库中。",
-                                 "游戏：%s\n路径：%s\n\n这不会删除任何已备份的数据，"
-                                 "之后可以重新添加。" % (g.name, "\n".join(g.paths)),
-                                 require_check=True, parent=self):
+        if self.cfg.safety.get("confirm_dangerous", True) and not ConfirmDialog.ask(
+                "移除游戏 —— %s" % g.name,
+                "将从列表移除该游戏，已备份的快照与 chunk 会保留在保险库中。",
+                "游戏：%s\n路径：%s\n\n这不会删除任何已备份的数据，"
+                "之后可以重新添加。" % (g.name, "\n".join(g.paths)),
+                require_check=True, parent=self):
             return
         self.vault.remove_game(g.id, keep_snapshots=True)
         self._log("已移除游戏：%s" % g.name)
@@ -816,5 +861,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, ev):
         ev.ignore()
         self.hide()
-        self.tray.showMessage("GameSaveCloud", "已最小化到托盘，仍在后台定时同步。",
+        tip = ("已最小化到托盘，仍在后台定时同步。"
+               if self.cfg.schedule.get("enabled") else
+               "已最小化到托盘；需要时可从托盘菜单立即备份。")
+        self.tray.showMessage("GameSaveCloud", tip,
                               QSystemTrayIcon.Information, 2000)

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from . import chunker
+from .vault import safe_join
 from .models import (Game, Snapshot, FileEntry, GameStatus, Conflict,
                      SYNC_SYNCED, SYNC_LOCAL_AHEAD, SYNC_REMOTE_AHEAD,
                      SYNC_CONFLICT, SYNC_UNKNOWN, SYNC_ERROR,
@@ -85,7 +86,11 @@ class SyncEngine:
     def status(self, game: Game) -> GameStatus:
         st = GameStatus(game_id=game.id)
         try:
-            local = self.vault.scan_local(game)
+            # 状态展示走快速路径：复用最新快照的 FileEntry，未变化的文件
+            # 不读盘、不重算哈希。真正的 plan()/execute() 仍然全量精算。
+            latest = self.vault.latest_snapshot(game.id)
+            hint = {e.path: e for e in latest.files} if latest else None
+            local = self.vault.scan_local(game, quick_hint=hint)
             st.local_size = sum(e.size for e in local)
         except Exception as e:
             st.state = SYNC_ERROR
@@ -333,9 +338,21 @@ class SyncEngine:
                         dst = self.vault.store.path_of(sha)
                         try:
                             self.remote.download_chunk(sha, dst)
-                            res["downloaded"] += 1
                         except Exception as e:
                             res["errors"].append("下载 %s 失败: %s" % (a.path, e))
+                            continue
+                        # 下载落盘后立刻解压重算哈希。弱网 / 代理服务器可能
+                        # 对 Range 请求返回 200 全量，ab 追加会拼出坏块；
+                        # 在这里拦下，坏 chunk 当场删除，绝不进入快照。
+                        if not self.vault.store.verify(sha):
+                            try:
+                                os.remove(dst)
+                            except OSError:
+                                pass
+                            res["errors"].append(
+                                "下载的 chunk 校验失败（疑似传输损坏）: %s" % sha)
+                        else:
+                            res["downloaded"] += 1
                     if progress_cb:
                         progress_cb("download", a.path)
 
@@ -397,15 +414,24 @@ class SyncEngine:
         return res
 
     # ---------- 落盘辅助 ----------
-    def _materialize(self, game: Game, entry: FileEntry, rel_path: str, note=""):
+    def _resolve(self, game: Game, rel_path: str):
+        """快照路径 → 本地真实路径。陈旧序号返回 None（跳过）；
+        越界路径抛 UnsafePathError（中止本次同步，不推进 base）。"""
         roots = game.paths
         if len(roots) == 1:
-            dst = os.path.join(roots[0], rel_path.replace("/", os.sep))
-        else:
-            parts = rel_path.split("/", 1)
-            if len(parts) != 2 or not parts[0].isdigit():
-                return
-            dst = os.path.join(roots[int(parts[0])], parts[1].replace("/", os.sep))
+            return safe_join(roots[0], rel_path)
+        parts = rel_path.split("/", 1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            return None
+        idx = int(parts[0])
+        if idx >= len(roots):
+            return None
+        return safe_join(roots[idx], parts[1])
+
+    def _materialize(self, game: Game, entry: FileEntry, rel_path: str, note=""):
+        dst = self._resolve(game, rel_path)
+        if dst is None:
+            return
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         if os.path.isfile(dst):
             self.vault._backup_existing(game.id, rel_path, dst,
@@ -415,14 +441,9 @@ class SyncEngine:
                 out.write(self.vault.store.read_decompressed(c.sha256))
 
     def _delete_local(self, game: Game, rel_path: str):
-        roots = game.paths
-        if len(roots) == 1:
-            dst = os.path.join(roots[0], rel_path.replace("/", os.sep))
-        else:
-            parts = rel_path.split("/", 1)
-            if len(parts) != 2 or not parts[0].isdigit():
-                return
-            dst = os.path.join(roots[int(parts[0])], parts[1].replace("/", os.sep))
+        dst = self._resolve(game, rel_path)
+        if dst is None:
+            return
         if os.path.isfile(dst):
             self.vault._backup_existing(game.id, rel_path, dst, reason="sync-delete")
             os.remove(dst)

@@ -368,9 +368,13 @@ class WebDAVBackend(RemoteBackend):
                 progress_cb(len(blob), len(blob))
             return False
         if have and have < len(blob):
-            self._req("PATCH" if False else "PUT", url,
-                      data=blob[have:], headers={"Content-Range": "bytes %d-*/%d"
-                                                 % (have, len(blob))})
+            # 续传用 PUT + Content-Range 尽最大努力（部分 WebDAV 服务器支持，
+            # 如坚果云 / Apache mod_dav 的追加扩展）；不支持的服务器会报错
+            # 或覆盖，下一轮同步会以 HEAD 校验结果决定是否重传，且本地
+            # chunk 按内容哈希命名，覆盖成错内容会被 verify() 拦下。
+            self._req("PUT", url, data=blob[have:],
+                      headers={"Content-Range": "bytes %d-*/%d"
+                               % (have, len(blob))})
         else:
             self._req("PUT", url, data=blob)
         if progress_cb:
