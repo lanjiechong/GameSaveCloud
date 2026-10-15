@@ -94,10 +94,14 @@ QtGui / QtCore / QtNetwork / QtOpenGL / QtPrintSupport，这些都不排。
 │  main_window.py           主窗口、队列式同步编排                │
 │  dialogs.py               确认 / 冲突 / 历史 / 差异 / 设置      │
 │  game_list.py             游戏列表自绘委托（图标+两行文字）      │
-│  logos.py                 游戏图标三级保障 + Steam 联网检索      │
+│  logos.py                 游戏图标五级保障 + Steam 联网检索      │
 │  workers.py               QRunnable + QThreadPool，信号回传     │
 │  theme.py                配色与样式表                          │
 │  assets/                  应用图标（PNG + 多尺寸 ICO）           │
+│  assets/logos/            内置 logo 包（Top100 真实图标 + 映射） │
+├───────────────────────────────────────────────────────────────┤
+│  scripts/                 维护工具（非运行时代码）               │
+│  fetch_top_logos.py       抓 Steam 销量榜、下载烘焙内置 logo 包  │
 └──────────────────────────┬────────────────────────────────────┘
                            │ 信号（progress / log / result / error）
 ┌──────────────────────────▼────────────────────────────────────┐
@@ -509,17 +513,42 @@ CLI测试        1 文件 14 B
 `status()` / `plan()` 在该标志为 False 时**不调用任何远端原语**
 （单元测试用一个「一被调用就抛 AssertionError」的后端来守住这条边界）。
 
-### 10.3 游戏图标：三级保障
+### 10.3 游戏图标：五级保障
 
 左侧列表每款游戏都有一个图标，来源按优先级：
 
 ```
-1. 磁盘缓存     ~/.gamesavecloud（或 %LOCALAPPDATA%）/logocache/<md5>.png
+1. 磁盘缓存     %LOCALAPPDATA%/GameSaveCloud/logocache/<md5>.png
                 —— 第二次启动直接用，离线也有图
-2. 内置预设     logos.py 的 BUILTIN 表，约 90 款热门游戏
+2. 内置 logo 包 ui/assets/logos/<appid>.png
+                —— Steam 全球周销量榜 Top100 + 常青经典的 93 款真实 logo，
+                   烘焙成 96px 圆角方块随应用分发，断网、首启即有图
+                   （未发售新游 CDN 无 logo 资产，取不到的走后面几级）
+3. 内置预设     logos.py 的 BUILTIN 表，约 90 款热门游戏
                 （配色 + 短代号，离线立刻可画，断网也不会空白）
-3. 联网检索     Steam 公开接口，见下
-4. 占位兜底     首字母色块，与真实图标同尺寸同圆角
+4. 联网检索     以上都没命中再走 Steam 公开接口，见下
+5. 占位兜底     首字母色块，与真实图标同尺寸同圆角
+```
+
+**为什么要有「内置 logo 包」这一层**（实测踩出来的坑）：
+
+扫描器给游戏起的是「中文俗名 英文名」组合名（`荒野大镖客2 Red Dead Redemption 2`），
+而 Steam 搜索只认官方名 —— 整个组合名丢进 `storesearch` **一个结果都返回不了**
+（实测：`term=荒野大镖客2 Red Dead Redemption 2` → 空；
+单独搜 `Red Dead Redemption 2` → 1174180）。只靠联网检索，
+热门游戏拿不到图、离线更是一片占位色块。所以把 Top100 的真实 logo
+直接打包进应用：`scripts/fetch_top_logos.py` 从 Steam 抓榜 → 下载 → 烘焙 → 生成
+`logo_pack.json`（appid → 官方中文名/英文名/俗名列表）。
+
+**内置包的名字匹配**（`_pack_lookup`，四轮从严到宽，天然兼容组合名）：
+
+```
+1. 整个名字精确命中            「GTA V」→ 271590
+2. 整个名字包含某个包内名       「荒野大镖客2 Red Dead Redemption 2」包含
+                               "reddeadredemption2" → 1174180（取最长命中）
+3. 按空格切 token 精确命中      「巫师3 The Witcher 3」→ token「巫师3」命中
+4. token 被某个包内名包含       「The Witcher 3」的 token「Witcher」不够长，
+                               但「thewitcher3」作为包内名被第 2 轮收掉
 ```
 
 **联网那一层的来源与校验：**
@@ -535,6 +564,9 @@ CLI测试        1 文件 14 B
 所以加了一道 `difflib.SequenceMatcher` 相似度校验（相等 / 互相包含 / 相似度 ≥ 0.62）。
 判「不像」就当作没找到，回落到预设或占位 —— **错的 logo 比没有 logo 更误导人**。
 
+另外，联网检索前会先把组合名拆出英文部分优先搜（`_search_terms`）：
+`荒野大镖客2 Red Dead Redemption 2` → 先搜 `Red Dead Redemption 2`。
+
 三个容易踩的坑，代码里都有对应处理：
 
 - **`QPixmap` / `QPainter` 只能在 GUI 线程用。** 工作线程只做网络 IO 和
@@ -543,6 +575,16 @@ CLI测试        1 文件 14 B
   保证同一款游戏每次启动都是同一个颜色。
 - **`QThreadPool.start()` 不持 Python 侧引用。** worker 若被 GC，
   `logo_ready` 永远发不出来。`LogoService` 自己维护了一份强引用表。
+
+**更新内置 logo 包**（可选，需要能访问 Steam 商店）：
+
+```powershell
+# 抓当前周销量榜前 100（store.steampowered.com 搜索页，国内需代理）
+# 把 appid 每行一个存成 top_ids.txt，然后：
+python scripts/fetch_top_logos.py --ids top_ids.txt
+```
+
+脚本只依赖 Pillow（构建期），运行时不依赖；已有图标不会重复下载。
 
 ### 10.4 左侧列表排版
 

@@ -1,0 +1,690 @@
+{
+ "generated_at": "2026-10-15",
+ "source": "Steam 全球周销量榜 Top100 + 常青经典补充 + 扫描器别名",
+ "tile": 96,
+ "games": {
+  "578080": {
+   "names": [
+    "PUBG: BATTLEGROUNDS",
+    "吃鸡",
+    "绝地求生",
+    "PUBG"
+   ],
+   "type": "game"
+  },
+  "570": {
+   "names": [
+    "Dota 2",
+    "刀塔2"
+   ],
+   "type": "game"
+  },
+  "730": {
+   "names": [
+    "Counter-Strike 2",
+    "CS2",
+    "CSGO2"
+   ],
+   "type": "game"
+  },
+  "2929250": {
+   "names": [
+    "越过山丘 over the hill",
+    "over the hill"
+   ],
+   "type": "game"
+  },
+  "1172470": {
+   "names": [
+    "Apex Legends™",
+    "Apex英雄"
+   ],
+   "type": "game"
+  },
+  "1808500": {
+   "names": [
+    "ARC Raiders"
+   ],
+   "type": "game"
+  },
+  "2807960": {
+   "names": [
+    "战地风云™ 6",
+    "Battlefield™ 6"
+   ],
+   "type": "game"
+  },
+  "1675200": {
+   "names": [
+    "Steam Deck"
+   ],
+   "type": "hardware"
+  },
+  "381210": {
+   "names": [
+    "黎明杀机",
+    "Dead by Daylight"
+   ],
+   "type": "game"
+  },
+  "1091500": {
+   "names": [
+    "赛博朋克 2077",
+    "Cyberpunk 2077"
+   ],
+   "type": "game"
+  },
+  "632360": {
+   "names": [
+    "雨中冒险 2",
+    "Risk of Rain 2"
+   ],
+   "type": "game"
+  },
+  "230410": {
+   "names": [
+    "Warframe 星际战甲",
+    "Warframe",
+    "星际战甲"
+   ],
+   "type": "game"
+  },
+  "2767030": {
+   "names": [
+    "漫威争锋",
+    "Marvel Rivals"
+   ],
+   "type": "game"
+  },
+  "2357570": {
+   "names": [
+    "《守望先锋®》",
+    "Overwatch®"
+   ],
+   "type": "game"
+  },
+  "976730": {
+   "names": [
+    "Halo: The Master Chief Collection"
+   ],
+   "type": "game"
+  },
+  "3010850": {
+   "names": [
+    "Gears of War: E-Day"
+   ],
+   "type": "game"
+  },
+  "1551980": {
+   "names": [
+    "Clive Barker's Hellraiser: Revival"
+   ],
+   "type": "game"
+  },
+  "2054970": {
+   "names": [
+    "Dragon's Dogma 2"
+   ],
+   "type": "game"
+  },
+  "2138330": {
+   "names": [
+    "《赛博朋克 2077：往日之影》",
+    "Cyberpunk 2077: Phantom Liberty"
+   ],
+   "type": "dlc"
+  },
+  "2183900": {
+   "names": [
+    "Warhammer 40,000: 星际战士2",
+    "Warhammer 40,000: Space Marine 2"
+   ],
+   "type": "game"
+  },
+  "1174180": {
+   "names": [
+    "Red Dead Redemption 2",
+    "荒野大镖客2",
+    "大表哥2",
+    "RDR2",
+    "Red Dead Redemption II",
+    "荒野大镖客2 Red Dead Redemption 2"
+   ],
+   "type": "game"
+  },
+  "553850": {
+   "names": [
+    "HELLDIVERS™ 绝地潜兵2",
+    "HELLDIVERS™ 2",
+    "地狱潜者2",
+    "绝地潜兵2"
+   ],
+   "type": "game"
+  },
+  "359550": {
+   "names": [
+    "彩虹六号：围攻",
+    "Tom Clancy's Rainbow Six Siege"
+   ],
+   "type": "game"
+  },
+  "1364780": {
+   "names": [
+    "Street Fighter 6",
+    "街霸6",
+    "街头霸王6"
+   ],
+   "type": "game"
+  },
+  "1203620": {
+   "names": [
+    "雾锁王国 (Enshrouded)",
+    "Enshrouded"
+   ],
+   "type": "game"
+  },
+  "2139460": {
+   "names": [
+    "七日世界",
+    "Once Human"
+   ],
+   "type": "game"
+  },
+  "1607250": {
+   "names": [
+    "MY HERO ULTRA RUMBLE"
+   ],
+   "type": "game"
+  },
+  "1142710": {
+   "names": [
+    "全面战争：战锤3",
+    "Total War: WARHAMMER III"
+   ],
+   "type": "game"
+  },
+  "3240220": {
+   "names": [
+    "Grand Theft Auto V 增强版",
+    "Grand Theft Auto V Enhanced"
+   ],
+   "type": "game"
+  },
+  "582660": {
+   "names": [
+    "Black Desert"
+   ],
+   "type": "game"
+  },
+  "236390": {
+   "names": [
+    "战争雷霆",
+    "War Thunder"
+   ],
+   "type": "game"
+  },
+  "2073620": {
+   "names": [
+    "暗区突围：无限",
+    "Arena Breakout: Infinite"
+   ],
+   "type": "game"
+  },
+  "1158310": {
+   "names": [
+    "Crusader Kings III"
+   ],
+   "type": "game"
+  },
+  "2871520": {
+   "names": [
+    "深馅地牢",
+    "Deep Dish Dungeon"
+   ],
+   "type": "game"
+  },
+  "1478500": {
+   "names": [
+    "Big Walk"
+   ],
+   "type": "game"
+  },
+  "1085660": {
+   "names": [
+    "命运2",
+    "Destiny 2"
+   ],
+   "type": "game"
+  },
+  "440": {
+   "names": [
+    "Team Fortress 2"
+   ],
+   "type": "game"
+  },
+  "252490": {
+   "names": [
+    "Rust"
+   ],
+   "type": "game"
+  },
+  "377160": {
+   "names": [
+    "Fallout 4"
+   ],
+   "type": "game"
+  },
+  "2967950": {
+   "names": [
+    "The Witch's Bakery"
+   ],
+   "type": "game"
+  },
+  "3299050": {
+   "names": [
+    "查无此地",
+    "No Such Place"
+   ],
+   "type": "game"
+  },
+  "1245620": {
+   "names": [
+    "艾尔登法环",
+    "ELDEN RING",
+    "老头环"
+   ],
+   "type": "game"
+  },
+  "814380": {
+   "names": [
+    "Sekiro™: Shadows Die Twice - GOTY Edition",
+    "只狼",
+    "只狼：影逝二度",
+    "Sekiro",
+    "只狼 Sekiro"
+   ],
+   "type": "game"
+  },
+  "2537590": {
+   "names": [
+    "Microsoft Flight Simulator 2024"
+   ],
+   "type": "game"
+  },
+  "2507950": {
+   "names": [
+    "三角洲行动 ",
+    "Delta Force"
+   ],
+   "type": "game"
+  },
+  "1151340": {
+   "names": [
+    "Fallout 76"
+   ],
+   "type": "game"
+  },
+  "1623730": {
+   "names": [
+    "Palworld / 幻兽帕鲁",
+    "Palworld",
+    "幻兽帕鲁"
+   ],
+   "type": "game"
+  },
+  "2072560": {
+   "names": [
+    "DRAGON BALL GEKISHIN SQUADRA"
+   ],
+   "type": "game"
+  },
+  "3493540": {
+   "names": [
+    "Transport Fever 3"
+   ],
+   "type": "game"
+  },
+  "2254990": {
+   "names": [
+    "永冻纪元 - Permafrost",
+    "Permafrost"
+   ],
+   "type": "game"
+  },
+  "2333000": {
+   "names": [
+    "银松镇",
+    "Silver Pines"
+   ],
+   "type": "game"
+  },
+  "2406770": {
+   "names": [
+    "Bodycam"
+   ],
+   "type": "game"
+  },
+  "39210": {
+   "names": [
+    "FINAL FANTASY XIV Online"
+   ],
+   "type": "game"
+  },
+  "1086940": {
+   "names": [
+    "博德之门3",
+    "Baldur's Gate 3"
+   ],
+   "type": "game"
+  },
+  "2887580": {
+   "names": [
+    "活性物质",
+    "Active Matter"
+   ],
+   "type": "game"
+  },
+  "108600": {
+   "names": [
+    "Project Zomboid"
+   ],
+   "type": "game"
+  },
+  "1974050": {
+   "names": [
+    "火炬之光：无限",
+    "Torchlight: Infinite"
+   ],
+   "type": "game"
+  },
+  "270880": {
+   "names": [
+    "American Truck Simulator",
+    "美卡 American Truck Simulator"
+   ],
+   "type": "game"
+  },
+  "431960": {
+   "names": [
+    "Wallpaper Engine：壁纸引擎",
+    "Wallpaper Engine",
+    "动态壁纸",
+    "壁纸引擎"
+   ],
+   "type": "game"
+  },
+  "1401590": {
+   "names": [
+    "迪士尼梦幻星谷",
+    "Disney Dreamlight Valley"
+   ],
+   "type": "game"
+  },
+  "271590": {
+   "names": [
+    "Grand Theft Auto V 传承版",
+    "Grand Theft Auto V Legacy",
+    "给他爱5",
+    "GTA5",
+    "侠盗猎车手5",
+    "侠盗猎车手V",
+    "GTA V"
+   ],
+   "type": "game"
+  },
+  "292030": {
+   "names": [
+    "巫师3：狂猎 — 重制版",
+    "The Witcher 3: Wild Hunt — Remastered",
+    "巫师3",
+    "巫师3狂猎",
+    "The Witcher 3"
+   ],
+   "type": "game"
+  },
+  "413150": {
+   "names": [
+    "Stardew Valley",
+    "星露谷物语",
+    "星露谷",
+    "星露谷物语 Stardew Valley"
+   ],
+   "type": "game"
+  },
+  "105600": {
+   "names": [
+    "Terraria",
+    "泰拉瑞亚",
+    "泰拉瑞亚 Terraria"
+   ],
+   "type": "game"
+  },
+  "1145360": {
+   "names": [
+    "Hades",
+    "哈迪斯",
+    "哈迪斯 Hades"
+   ],
+   "type": "game"
+  },
+  "367520": {
+   "names": [
+    "Hollow Knight",
+    "空洞骑士",
+    "空洞骑士 Hollow Knight"
+   ],
+   "type": "game"
+  },
+  "504230": {
+   "names": [
+    "Celeste",
+    "蔚蓝"
+   ],
+   "type": "game"
+  },
+  "588650": {
+   "names": [
+    "Dead Cells",
+    "死亡细胞",
+    "死亡细胞 Dead Cells"
+   ],
+   "type": "game"
+  },
+  "1145350": {
+   "names": [
+    "Hades II",
+    "哈迪斯2",
+    "哈迪斯2 Hades II"
+   ],
+   "type": "game"
+  },
+  "2379780": {
+   "names": [
+    "Balatro",
+    "小丑牌"
+   ],
+   "type": "game"
+  },
+  "1868140": {
+   "names": [
+    "潜水员戴夫 DAVE THE DIVER",
+    "DAVE THE DIVER",
+    "潜水员戴夫"
+   ],
+   "type": "game"
+  },
+  "1097150": {
+   "names": [
+    "糖豆人",
+    "Fall Guys"
+   ],
+   "type": "game"
+  },
+  "945360": {
+   "names": [
+    "Among Us",
+    "太空狼人杀",
+    "我们之中"
+   ],
+   "type": "game"
+  },
+  "892970": {
+   "names": [
+    "Valheim: 英灵神殿",
+    "Valheim",
+    "英灵神殿",
+    "英灵神殿 Valheim 世界"
+   ],
+   "type": "game"
+  },
+  "526870": {
+   "names": [
+    "幸福工厂",
+    "Satisfactory"
+   ],
+   "type": "game"
+  },
+  "427520": {
+   "names": [
+    "Factorio",
+    "异星工厂",
+    "异星工厂 Factorio"
+   ],
+   "type": "game"
+  },
+  "294100": {
+   "names": [
+    "边缘世界 RimWorld",
+    "RimWorld",
+    "边缘世界"
+   ],
+   "type": "game"
+  },
+  "457140": {
+   "names": [
+    "缺氧",
+    "Oxygen Not Included"
+   ],
+   "type": "game"
+  },
+  "255710": {
+   "names": [
+    "Cities: Skylines",
+    "城市天际线",
+    "城市：天际线 Cities: Skylines"
+   ],
+   "type": "game"
+  },
+  "613100": {
+   "names": [
+    "房产达人",
+    "House Flipper"
+   ],
+   "type": "game"
+  },
+  "1593500": {
+   "names": [
+    "God of War",
+    "战神",
+    "战神4",
+    "战神4 God of War"
+   ],
+   "type": "game"
+  },
+  "1361210": {
+   "names": [
+    "战锤40K：暗潮",
+    "Warhammer 40,000: Darktide",
+    "暗潮"
+   ],
+   "type": "game"
+  },
+  "524220": {
+   "names": [
+    "NieR:Automata™",
+    "尼尔：机械纪元",
+    "尼尔：机械纪元 NieR Automata",
+    "机械纪元 Automata"
+   ],
+   "type": "game"
+  },
+  "2050650": {
+   "names": [
+    "Resident Evil 4",
+    "生化危机4",
+    "生化危机4重制版"
+   ],
+   "type": "game"
+  },
+  "1190460": {
+   "names": [
+    "DEATH STRANDING",
+    "死亡搁浅"
+   ],
+   "type": "game"
+  },
+  "1222670": {
+   "names": [
+    "The Sims™ 4",
+    "模拟人生4"
+   ],
+   "type": "game"
+  },
+  "374320": {
+   "names": [
+    "DARK SOULS™ III",
+    "黑暗之魂3",
+    "魂3",
+    "黑暗之魂3 Dark Souls III"
+   ],
+   "type": "game"
+  },
+  "570940": {
+   "names": [
+    "DARK SOULS™: REMASTERED",
+    "黑暗之魂",
+    "黑暗之魂重制版"
+   ],
+   "type": "game"
+  },
+  "1627720": {
+   "names": [
+    "Lies of P",
+    "匹诺曹的谎言"
+   ],
+   "type": "game"
+  },
+  "1448440": {
+   "names": [
+    "Wo Long: Fallen Dynasty （卧龙：苍天陨落）",
+    "Wo Long: Fallen Dynasty",
+    "卧龙：苍天陨落"
+   ],
+   "type": "game"
+  },
+  "1326470": {
+   "names": [
+    "Sons Of The Forest",
+    "森林",
+    "The Forest",
+    "森林之子 Sons of the Forest"
+   ],
+   "type": "game"
+  },
+  "924970": {
+   "names": [
+    "喋血复仇",
+    "Back 4 Blood"
+   ],
+   "type": "game"
+  },
+  "990080": {
+   "names": [
+    "霍格沃茨之遗",
+    "Hogwarts Legacy",
+    "霍格沃茨之遗 Hogwarts Legacy"
+   ],
+   "type": "game"
+  }
+ }
+}

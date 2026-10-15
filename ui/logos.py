@@ -2,13 +2,15 @@
 """
 游戏图标（logo）加载服务。
 
-三级保障，任何一层失败都不会出现空白、破图或布局错位：
+五级保障，任何一层失败都不会出现空白、破图或布局错位：
 
     1. 已下载缓存    磁盘缓存命中 → 直接返回，离线也能用
-    2. 内置预设      常见热门游戏有预置配色与代号，**立刻可画**，
-                     不依赖网络，不等请求
-    3. 联网检索      其余游戏走 Steam 公开接口找真实 logo
-    4. 占位兜底      全部失败时画一个「首字母色块」，
+    2. 内置 logo 包   Steam 全球周销量榜 Top100 + 常青经典（约 130 款）
+                     的真实 logo，烘焙成 96px 圆角方块随应用分发，
+                      断网、首次启动即有图，不等请求
+    3. 内置预设      其余常见游戏有预置配色与代号，**立刻可画**
+    4. 联网检索      都没命中再走 Steam 公开接口找真实 logo
+    5. 占位兜底      全部失败时画一个「首字母色块」，
                      尺寸、圆角、位置与真实图标完全一致
 
 图标来源（联网那一层）：
@@ -22,11 +24,19 @@
 风险是名称匹配可能对不上，所以加了一道相似度校验 ——
 对不上就当作没找到，回落到预设/占位，绝不显示一张来路不明的图。
 
+关于名字：扫描器给游戏起的是「中文俗名 英文名」组合名
+（如「荒野大镖客2 Red Dead Redemption 2」），而 Steam 只认官方名，
+整个组合名丢进去搜不到任何东西。所以联网检索会拆出英文部分优先搜；
+内置 logo 包则用「精确 / 包含 / 分词」四级名字匹配，天然兼容组合名。
+
+内置 logo 包的构建：scripts/fetch_top_logos.py（维护工具，需联网+Pillow）。
+
 所有网络 IO 都在工作线程里跑，主线程只收信号。
 """
 import hashlib
 import json
 import os
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -126,6 +136,92 @@ NEUTRAL = ["#5b6b7c", "#6b7a8f", "#4f6d7a", "#7a6b5b", "#5f7a5f",
            "#7a5f6b", "#6b5f7a", "#7a7a5f"]
 
 
+# ---------------------------------------------------------------
+# 内置 logo 包（scripts/fetch_top_logos.py 生成，随应用分发）
+# ---------------------------------------------------------------
+def _pack_dir() -> str:
+    """logo 包目录。开发时在 ui/assets/logos/，PyInstaller 打包后在 _MEIPASS。"""
+    if getattr(sys, "_MEIPASS", None):
+        return os.path.join(sys._MEIPASS, "ui", "assets", "logos")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "assets", "logos")
+
+
+_PACK = None          # {"<appid>": ["名1", "名2", ...]}，懒加载
+_PACK_INDEX = None    # 归一化名 -> appid，精确命中用
+
+
+def _load_pack():
+    """读 logo_pack.json。文件不存在或损坏时静默按空包处理。"""
+    global _PACK, _PACK_INDEX
+    if _PACK is not None:
+        return _PACK
+    _PACK, _PACK_INDEX = {}, {}
+    try:
+        with open(os.path.join(_pack_dir(), "logo_pack.json"),
+                  encoding="utf-8") as f:
+            data = json.load(f)
+        for appid, ent in (data.get("games") or {}).items():
+            names = [n for n in (ent.get("names") or []) if n]
+            if not names:
+                continue
+            _PACK[appid] = names
+            for n in names:
+                k = _norm(n)
+                if k and k not in _PACK_INDEX:
+                    _PACK_INDEX[k] = appid
+    except Exception:
+        _PACK, _PACK_INDEX = {}, {}
+    return _PACK
+
+
+def _pack_lookup(name: str):
+    """在内置 logo 包里按名字找 appid，找不到返回 None。
+
+    游戏名可能是「中文俗名 英文名」的组合（扫描器就这么起名的），
+    所以按四轮找，从严到宽：
+        1. 整个名字精确命中索引
+        2. 整个名字包含某个包内名 —— 「荒野大镖客2 Red Dead Redemption 2」
+           归一化后包含 "reddeadredemption2"，直接命中；
+           多个命中时取最长的，避免「巫师3」抢在「巫师3狂猎」前面
+        3. 按空格切开逐个 token 精确命中 —— 短中文名如「巫师3」
+           归一化后只有 3 字符，够不上第 2 轮的长度下限，
+           但作为独立 token 能精确命中
+        4. token 被某个包内名包含（仅这一方向，反向会出现
+           「Dead」命中 deadcells 这类误判）
+    """
+    _load_pack()
+    if not _PACK:
+        return None
+    key = _norm(name)
+    if not key:
+        return None
+    if key in _PACK_INDEX:
+        return _PACK_INDEX[key]
+    best = None
+    for appid, names in _PACK.items():
+        for n in names:
+            nk = _norm(n)
+            if len(nk) >= 4 and nk in key:
+                if best is None or len(nk) > best[0]:
+                    best = (len(nk), appid)
+    if best:
+        return best[1]
+    for tok in (name or "").split():
+        if _norm(tok) in _PACK_INDEX:
+            return _PACK_INDEX[_norm(tok)]
+    for tok in (name or "").split():
+        tk = _norm(tok)
+        if len(tk) < 4:
+            continue
+        for appid, names in _PACK.items():
+            for n in names:
+                nk = _norm(n)
+                if len(nk) >= 4 and nk in tk:
+                    return appid
+    return None
+
+
 def _norm(s: str) -> str:
     """归一化名字：小写、只留字母数字。用于匹配与查表。"""
     return "".join(ch for ch in s.lower() if ch.isalnum())
@@ -192,15 +288,36 @@ class LogoService(QObject):
         if disk is not None:
             self._pixmaps[key] = disk
             return disk
-        # 2. 内置预设（断网也有像样的图标）
+        # 2. 内置 logo 包（销量榜 Top100 + 常青经典，真实 logo 离线可用）
+        packed = self._load_pack_pixmap(name)
+        if packed is not None:
+            self._pixmaps[key] = packed
+            return packed
+        # 3. 内置绘制预设（断网也有像样的图标）
         return self._draw_builtin(name)
 
+    def _load_pack_pixmap(self, name: str):
+        """按名字从内置 logo 包里取图；包里没有返回 None。"""
+        appid = _pack_lookup(name)
+        if not appid:
+            return None
+        p = os.path.join(_pack_dir(), "%s.png" % appid)
+        if not os.path.isfile(p):
+            return None
+        pm = QPixmap(p)
+        return pm if not pm.isNull() else None
+
     def request(self, name: str):
-        """请求联网图标。已缓存/正在请求/已知失败的直接跳过。"""
+        """请求联网图标。已缓存/包内已有/正在请求/已知失败的直接跳过。"""
         key = _norm(name)
         if not key or key in self._pending or key in self._failed:
             return
         if key in self._pixmaps:
+            return
+        if _pack_lookup(name):
+            # 内置 logo 包里已经有这款的真实 logo，没必要联网。
+            # 不跳过的话，一次联网失败还会把 key 记进 _failed，
+            # 反而把「本来离线就有图」的状态搅乱。
             return
         self._pending.add(key)
 
@@ -267,9 +384,37 @@ class LogoService(QObject):
         return None
 
     def _steam_appid(self, name: str):
-        """在 Steam 商店里搜这款游戏，返回 appid（不确定就返回 None）。"""
+        """在 Steam 商店里搜这款游戏，返回 appid（不确定就返回 None）。
+
+        扫描器起的游戏名是「中文俗名 英文名」组合名
+        （如「荒野大镖客2 Red Dead Redemption 2」）。Steam 的搜索
+        只认官方名，把整个组合名丢进去**一个结果都没有**
+        （实测：term=荒野大镖客2 Red Dead Redemption 2 → 空；
+        单独搜 Red Dead Redemption 2 → 1174180）。
+        所以按候选词逐个试：英文部分优先，再全名，再中文部分。
+        """
+        for term in self._search_terms(name):
+            appid = self._search_one(term)
+            if appid:
+                return appid
+        return None
+
+    @staticmethod
+    def _search_terms(name: str):
+        """从游戏名生成搜索候选词，越可能命中的越靠前。"""
+        words = (name or "").split()
+        ascii_run = " ".join(w for w in words if w.isascii() and w.strip())
+        zh_run = "".join(w for w in words if not w.isascii() and w.strip())
+        terms = []
+        for t in (ascii_run, name, zh_run):
+            if t and t not in terms:
+                terms.append(t)
+        return terms
+
+    def _search_one(self, term: str):
+        """拿单个候选词搜一次 Steam，返回 appid 或 None。"""
         url = ("https://store.steampowered.com/api/storesearch/"
-               "?term=%s&cc=cn&l=schinese" % urllib.parse.quote(name))
+               "?term=%s&cc=cn&l=schinese" % urllib.parse.quote(term))
         raw = self._http(url)
         if not raw:
             return None
@@ -282,10 +427,10 @@ class LogoService(QObject):
             if it.get("type") and it.get("type") != "app":
                 continue                      # 跳过 DLC / 原声带 / 捆绑包
             cand = it.get("name") or ""
-            if _name_match(name, cand):
+            if _name_match(term, cand):
                 # 多个候选时取相似度最高的
-                if best is None or _similar(_norm(name), _norm(cand)) > best[0]:
-                    best = (_similar(_norm(name), _norm(cand)), it.get("id"))
+                if best is None or _similar(_norm(term), _norm(cand)) > best[0]:
+                    best = (_similar(_norm(term), _norm(cand)), it.get("id"))
         return best[1] if best else None
 
     @staticmethod
