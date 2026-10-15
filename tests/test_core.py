@@ -333,6 +333,82 @@ class TestPruning(BaseSyncTest):
                              n_chunks)
 
 
+class TestMergeDuplicates(BaseSyncTest):
+    """刷新时自动合并「完全相同的备份」。"""
+
+    def _three_identical(self):
+        write(os.path.join(self.save_dir, "a.sav"), b"same-content")
+        snaps = []
+        for _ in range(3):
+            snaps.append(self.vault.create_snapshot(self.game, kind="auto"))
+            time.sleep(0.01)
+        return snaps
+
+    def test_merge_identical_keeps_newest(self):
+        snaps = self._three_identical()
+        self.assertEqual(len(self.vault.list_snapshots(self.game.id)), 3)
+        removed = self.vault.merge_duplicate_snapshots(self.game.id)
+        self.assertEqual(removed, 2)
+        left = self.vault.list_snapshots(self.game.id)
+        self.assertEqual(len(left), 1)
+        # 留下的是组内最新的一份
+        self.assertEqual(left[0].id, snaps[-1].id)
+        # chunk 被保留的那份引用着，不能被 gc 收走
+        self.assertTrue(self.vault.store.has(left[0].files[0].chunks[0].sha256))
+
+    def test_merge_keeps_different(self):
+        for i in range(3):
+            write(os.path.join(self.save_dir, "a.sav"), b"v%d" % i)
+            self.vault.create_snapshot(self.game)
+            time.sleep(0.01)
+        removed = self.vault.merge_duplicate_snapshots(self.game.id)
+        self.assertEqual(removed, 0)
+        self.assertEqual(len(self.vault.list_snapshots(self.game.id)), 3)
+
+    def test_merge_mtime_only_change_still_merges(self):
+        """内容哈希不变、只有 mtime 变（游戏「读了但没改」）也应合并。"""
+        write(os.path.join(self.save_dir, "a.sav"), b"same-content")
+        s1 = self.vault.create_snapshot(self.game)
+        p = os.path.join(self.save_dir, "a.sav")
+        st = os.stat(p)
+        os.utime(p, (st.st_atime + 60, st.st_mtime + 60))
+        s2 = self.vault.create_snapshot(self.game)
+        self.assertEqual(s1.files[0].sha256, s2.files[0].sha256)
+        removed = self.vault.merge_duplicate_snapshots(self.game.id)
+        self.assertEqual(removed, 1)
+
+    def test_merge_protects_base_snapshot(self):
+        """同步基准是三方合并的参照物，即使内容相同也不能删。"""
+        snaps = self._three_identical()
+        base = snaps[0]                       # 最旧的那份当基准
+        self.vault.set_sync_state(self.game.id, base_snapshot_id=base.id,
+                                  last_sync_at=time.time())
+        removed = self.vault.merge_duplicate_snapshots(self.game.id)
+        self.assertEqual(removed, 1)          # 只删中间的，基准和最新的都留
+        ids = [s.id for s in self.vault.list_snapshots(self.game.id)]
+        self.assertIn(base.id, ids)
+        self.assertIn(snaps[-1].id, ids)
+
+    def test_merge_single_snapshot_noop(self):
+        write(os.path.join(self.save_dir, "a.sav"), b"only-one")
+        self.vault.create_snapshot(self.game)
+        self.assertEqual(self.vault.merge_duplicate_snapshots(self.game.id), 0)
+        self.assertEqual(len(self.vault.list_snapshots(self.game.id)), 1)
+
+    def test_merge_mixed_groups(self):
+        """A A B A B：合并后各留最新的一份（A 留 v3 的 A，B 留第二个 B）。"""
+        for content in (b"A", b"A", b"B", b"A", b"B"):
+            write(os.path.join(self.save_dir, "a.sav"), content)
+            self.vault.create_snapshot(self.game)
+            time.sleep(0.01)
+        removed = self.vault.merge_duplicate_snapshots(self.game.id)
+        self.assertEqual(removed, 3)
+        left = self.vault.list_snapshots(self.game.id)
+        self.assertEqual(len(left), 2)
+        self.assertEqual([s.files[0].sha256 for s in left],
+                         [chunker.sha256_hex(b"B"), chunker.sha256_hex(b"A")])
+
+
 class TestSnapshotAndRollback(BaseSyncTest):
     def test_snapshot_then_rollback(self):
         write(os.path.join(self.save_dir, "a.sav"), b"version-1")

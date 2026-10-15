@@ -5,7 +5,7 @@
 
 APP_NAME = "GameSaveCloud"
 APP_TAGLINE = "游戏存档备份与同步"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # 发布信息（「关于」对话框与 CLI --version 展示）
 AUTHOR = "lanjiechong"

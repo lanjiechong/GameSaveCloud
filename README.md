@@ -5,7 +5,7 @@
 
 约 5600 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
 
-**当前版本 v1.0.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
+**当前版本 v1.1.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -68,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 60 个核心引擎单元测试
+python tests/test_core.py                                # 66 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -251,6 +251,13 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 同一游戏相邻两个版本通常只差几个 chunk，所以「保留 30 个历史版本」的
 额外磁盘开销远小于 30 倍。测试 `test_same_content_two_games_share_one_chunk`。
 
+chunk 层面共享了，但**快照清单**不会：连着点几次「立即备份」、定时备份每小时
+跑一轮而存档根本没变，历史列表就会堆着一排时间不同、内容完全相同的条目。
+所以每次刷新会先做一次 `merge_duplicate_snapshots`：按内容指纹
+（路径 + 哈希 + 大小 + 分块序列，不含 mtime）分组，保留组内最新的一份，
+其余删除并 gc。同步基准 `base_snapshot_id` 指向的快照受保护不删——
+它是三方合并的参照物。测试见 `TestMergeDuplicates`。
+
 ### 4.5 断点续传
 
 - **本地目录后端**：上传写 `_tmp/<sha>.part`，若 `.part` 大小已达目标就直接 `os.replace` 改名；下载同理比对 `.part` 已下载字节数。
@@ -337,6 +344,14 @@ remote/                                 云端（默认 %LOCALAPPDATA%/GameSaveC
    就直接返回。否则一小时一次的定时同步会在无变化时也造一份，
    一年就是近九千份几乎相同的清单，把保留配额全部占满
    （测试 `test_noop_sync_creates_no_snapshot`）。
+
+### 重复备份自动合并
+
+`Vault.merge_duplicate_snapshots(game_id)` 在每次**刷新**时先跑：
+按内容指纹（路径 + 哈希 + 大小 + 分块序列，不含 mtime）把快照分组，
+保留组内最新的一份，其余删除并 gc。手动连点备份、定时备份遇上
+存档没变，都不再堆出一排内容相同的历史条目。同步基准同样受保护
+（测试 `TestMergeDuplicates`，6 个用例）。
 
 ---
 

@@ -3,6 +3,17 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.0] - 2026-10-15
+
+### 新增
+
+- **重复备份自动合并**：刷新时自动识别并合并内容完全相同的快照。
+  连着点几次「立即备份」、定时备份每小时跑一轮而存档没变时，历史列表
+  不再堆着一排时间不同、内容相同的条目。判定看内容（路径 + 哈希 +
+  大小 + 分块序列），mtime 抖动不影响；保留组内最新的一份，
+  同步基准（base_snapshot_id）指向的快照受保护不删，删除后自动 gc
+  回收失去引用的 chunk。合并数量在日志里报告。
+
 ## [1.0.0] - 2026-10-15
 
 首个正式版本。本机游戏存档的备份、历史版本、回滚与多设备同步工具。
@@ -70,4 +81,5 @@
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.1.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.1.0
 [1.0.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.0.0

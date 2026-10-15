@@ -374,6 +374,54 @@ class Vault:
         return removed
 
     # ==========================================================
+    # 重复快照合并
+    # ==========================================================
+    @staticmethod
+    def manifest_fingerprint(snap: Snapshot) -> str:
+        """快照的内容指纹：文件清单逐字节等价即为「完全相同的备份」。
+
+        纳入判定：每个文件的 (相对路径, 内容 sha256, 大小, 分块序列)。
+        不纳入：created_at / kind / note / 快照 id / mtime ——
+        前者是元数据，mtime 会因游戏「读了但没改」而抖动，
+        内容哈希不变就没有合并的意义外的干扰。
+        """
+        parts = []
+        for e in sorted(snap.files, key=lambda x: x.path):
+            chunks = ",".join("%s:%d" % (c.sha256, c.size) for c in e.chunks)
+            parts.append("%s|%s|%d|%s" % (e.path, e.sha256, e.size, chunks))
+        return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+    def merge_duplicate_snapshots(self, game_id: str) -> int:
+        """合并内容完全相同的快照，返回删除数。
+
+        场景：连着点几次「立即备份」、定时备份每小时跑一轮而存档没变 ——
+        chunk 因为内容寻址天然共享，但快照清单会一份份堆着，
+        历史列表里出现一排时间不同、内容相同的条目，选哪份回滚都一样。
+
+        保留组内最新的一份（created_at 最大），删除其余。
+        保护：sync_state.base_snapshot_id 指向的快照不删 —— 它是三方
+        合并的参照物，与 prune_snapshots 同款保护。
+        """
+        snaps = self.list_snapshots(game_id)          # created_at 倒序
+        if len(snaps) < 2:
+            return 0
+        ss = self.get_sync_state(game_id) or {}
+        base_id = ss.get("base_snapshot_id")
+        seen = set()
+        removed = 0
+        for s in snaps:
+            fp = self.manifest_fingerprint(s)
+            if fp in seen:
+                if s.id != base_id:
+                    self.delete_snapshot(s.id)
+                    removed += 1
+            else:
+                seen.add(fp)
+        if removed:
+            self.gc()
+        return removed
+
+    # ==========================================================
     # 还原（覆盖前自动留底）
     # ==========================================================
     def restore_snapshot(self, game: Game, sid: str, safety: bool = True,

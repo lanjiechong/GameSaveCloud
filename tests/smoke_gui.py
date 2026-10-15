@@ -157,8 +157,29 @@ def main():
     pump(ms=5000, rounds=10)
     check("本地模式同步后 busy 回落", w.busy is False, "busy=%r" % w.busy)
     n_after = len(w.vault.list_snapshots(g.id))
-    check("本地模式同步多存了一份快照", n_after > n_before,
+    # v1.1.0 起：内容完全相同的快照在刷新时自动合并，不再逐份堆积。
+    # 同步造的新快照若与既有内容一致，会被合并成一份（保留最新）。
+    snaps = w.vault.list_snapshots(g.id)
+    fps = [w.vault.manifest_fingerprint(s) for s in snaps]
+    check("刷新后不存在内容重复的快照", len(fps) == len(set(fps)),
+          "%d 份快照只有 %d 种内容" % (len(fps), len(set(fps))))
+    check("同步不会让快照数失控增长", n_after <= n_before + 1,
           "%d -> %d" % (n_before, n_after))
+
+    # v1.1.0 专项：手工造两份完全相同的快照，刷新后必须合并成一份
+    n_base = len(w.vault.list_snapshots(g.id))
+    w.vault.create_snapshot(g, kind="manual")     # 存档没动，内容必然相同
+    w.vault.create_snapshot(g, kind="manual")
+    check("构造了两份相同快照", len(w.vault.list_snapshots(g.id)) == n_base + 2,
+          "%d -> %d" % (n_base, len(w.vault.list_snapshots(g.id))))
+    w.refresh_all()
+    pump(ms=3000, rounds=6)
+    snaps2 = w.vault.list_snapshots(g.id)
+    fps2 = [w.vault.manifest_fingerprint(s) for s in snaps2]
+    check("刷新合并了完全相同的快照", len(snaps2) == n_base,
+          "%d -> %d" % (n_base + 2, len(snaps2)))
+    check("合并后内容仍无重复", len(fps2) == len(set(fps2)),
+          "%d 份只有 %d 种内容" % (len(fps2), len(set(fps2))))
     logtext = w.log_view.toPlainText()
     check("同步日志无异常栈", "Traceback" not in logtext)
     # 注意：LOCALAPPDATA/GameSaveCloud 是应用自己的 base 目录

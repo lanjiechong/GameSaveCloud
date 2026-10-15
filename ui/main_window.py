@@ -309,13 +309,19 @@ class MainWindow(QMainWindow):
         games = self.vault.list_games()
 
         def job(sig):
+            # 先合并完全相同的重复备份：连着几次备份/定时备份而存档没变时，
+            # 历史列表会堆着一排内容相同的条目。chunk 已共享，删的是
+            # 快照清单本身。base_snapshot_id 指向的在 vault 层受保护。
+            merged = 0
+            for g in games:
+                merged += self.vault.merge_duplicate_snapshots(g.id)
             out = []
             for g in games:
                 out.append(self.engine.status(g))
-            return games, out
+            return games, out, merged
 
         def done(res):
-            games, sts = res
+            games, sts, merged = res
             self.statuses = {s.game_id: s for s in sts}
             self.game_list.clear()
             for g, s in zip(games, sts):
@@ -335,6 +341,8 @@ class MainWindow(QMainWindow):
             for s in sts:
                 if s.state == SYNC_CONFLICT:
                     self._log("⚠ %s 存在 %s" % (s.game_id, s.message))
+            if merged:
+                self._log("已合并 %d 个完全相同的重复备份" % merged)
             self._log("刷新完成，共 %d 款游戏" % len(games))
 
         run_async(job, on_result=done,

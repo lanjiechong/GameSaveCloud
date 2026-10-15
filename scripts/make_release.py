@@ -8,10 +8,14 @@ import urllib.request
 
 TOKEN = os.environ.get("GSC_GH_TOKEN", "")
 REPO = "lanjiechong/GameSaveCloud"
-TAG = "v1.0.0"
+# 版本号以仓库里的 version.py 为准，tag 形如 v1.1.0
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from version import VERSION  # noqa: E402
+
+TAG = "v" + VERSION
 DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dist")
 
-BODY = """## GameSaveCloud v1.0.0
+BODY = """## GameSaveCloud __VERSION__
 
 本机游戏存档的备份、历史版本、回滚与多设备同步工具。**本地备份为主，云备份为可选项** —— 不配任何云端也能完整工作。
 
@@ -28,6 +32,7 @@ BODY = """## GameSaveCloud v1.0.0
 ### 核心特性
 
 - **备份引擎**：分块存储 + zstd 压缩 + 内容寻址去重，跨版本共享未变化的块；chunk 级断点续传
+- **重复备份自动合并**：刷新时自动识别内容完全相同的快照并合并，历史列表不再堆着一排时间不同、内容相同的条目；同步基准受保护
 - **历史与回滚**：快照清单、内容查看、逐文件 diff、一键回滚（回滚前自动留底）；默认保留最近 30 个快照
 - **云端同步（可选）**：本地文件夹 / WebDAV 两种后端；本地与云端同时改动时弹窗交人决策（保留本地 / 使用云端 / 两边各存一份），绝不静默二选一
 - **调度**：定时自动备份、托盘常驻、可选开机自启
@@ -42,7 +47,7 @@ BODY = """## GameSaveCloud v1.0.0
 
 ### 质量保障
 
-- 60 个单元测试覆盖引擎层（分块去重 / 快照 / 同步 / 冲突策略 /
+- 66 个单元测试覆盖引擎层（分块去重 / 快照合并 / 同步 / 冲突策略 /
   路径安全 / 凭据加密）
 - GUI 冒烟测试（离屏）：后台线程 SQLite、8 线程并发读、对话框构造、本地/云端两条同步链路
 - 危险操作（回滚、覆盖、删除）一律二次确认，默认取消
@@ -78,8 +83,9 @@ def build_body():
         p = os.path.join(DIST, name)
         if os.path.isfile(p):
             lines.append("%s\n%s" % (sha256_of(p), name))
-    return BODY.replace("__HASHES__", "\n".join(lines) if lines
-                        else "（未在 dist/ 找到 exe，跳过）")
+    return (BODY.replace("__HASHES__", "\n".join(lines) if lines
+                         else "（未在 dist/ 找到 exe，跳过）")
+               .replace("__VERSION__", VERSION))
 
 
 def api(url, method="GET", data=None, headers=None, timeout=120):
@@ -126,7 +132,7 @@ def main():
             return 1
         rel = api("https://api.github.com/repos/%s/releases" % REPO, "POST", {
             "tag_name": TAG,
-            "name": "GameSaveCloud v1.0.0 —— 游戏存档备份与同步",
+            "name": "GameSaveCloud %s —— 游戏存档备份与同步" % VERSION,
             "body": body,
             "draft": False,
             "prerelease": False,
