@@ -8,15 +8,21 @@ GameSaveCloud 启动入口。
     python run.py --cli scan      # 命令行扫描本机存档目录
     python run.py --cli sync      # 命令行同步全部（冲突时退出并提示）
     python run.py --cli backup    # 命令行立即备份全部
+    python run.py --version       # 显示版本号
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from version import APP_NAME, VERSION
+
 
 def main():
     args = sys.argv[1:]
+    if "--version" in args or "-V" in args:
+        print("%s %s" % (APP_NAME, VERSION))
+        return 0
     if "--cli" in args:
         return _cli(args[args.index("--cli") + 1:])
 
@@ -24,7 +30,8 @@ def main():
     from ui.main_window import MainWindow
 
     app = QApplication(sys.argv)
-    app.setApplicationName("GameSaveCloud")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(VERSION)
     app.setQuitOnLastWindowClosed(False)
     w = MainWindow()
     w.show()

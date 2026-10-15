@@ -4,7 +4,8 @@
 核心承诺：**任何情况下不丢存档** —— 覆盖、回滚、冲突、删除，每一步之前都先留底。
 
 约 5600 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
-已打包为 Windows 单文件 exe，**双击即用，无需安装 Python**。
+
+**当前版本 v1.0.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **本地备份为主，云备份为可选项。** 开箱即用，不配任何云端也能完整工作：
 备份、历史版本、回滚、冲突检测全部在本地完成。只有在设置里勾选「启用云端同步」
@@ -16,19 +17,28 @@
 
 ### 方式一：直接用打包好的 exe（推荐，无需装任何东西）
 
+到 [Releases 页面](https://github.com/lanjiechong/GameSaveCloud/releases) 下载最新版：
+
 ```
-dist\GameSaveCloud.exe        双击启动图形界面（无控制台窗口）
-dist\GameSaveCloud-CLI.exe    命令行版，供计划任务 / 脚本调用
+GameSaveCloud.exe        图形界面版（无控制台窗口，双击即用）
+GameSaveCloud-CLI.exe    命令行版，供计划任务 / 脚本调用
 ```
 
 两个都是**单文件**，拷到任何一台 Windows 机器上都能直接跑。
 数据存放在 `%LOCALAPPDATA%\GameSaveCloud\`，换机器用只需把 exe 拷过去。
+
+也可以从源码自行构建（产物在 `dist/`）：
+
+```bash
+pyinstaller GameSaveCloud.spec --noconfirm
+```
 
 ```cmd
 GameSaveCloud-CLI.exe status    :: 各游戏同步状态
 GameSaveCloud-CLI.exe scan      :: 扫描本机存档目录
 GameSaveCloud-CLI.exe backup    :: 立即备份全部
 GameSaveCloud-CLI.exe sync      :: 同步全部（未配云端时等同 backup）
+GameSaveCloud-CLI.exe --version :: 显示版本号
 ```
 
 CLI 版退出码：`0` 成功 / `1` 用法错误 / `2` 存在未处理的冲突 —— 可以直接被计划任务判断。
@@ -102,6 +112,10 @@ QtGui / QtCore / QtNetwork / QtOpenGL / QtPrintSupport，这些都不排。
 ├───────────────────────────────────────────────────────────────┤
 │  scripts/                 维护工具（非运行时代码）               │
 │  fetch_top_logos.py       抓 Steam 销量榜、下载烘焙内置 logo 包  │
+├───────────────────────────────────────────────────────────────┤
+│  version.py               版本号（发版只改这里，配合 git tag）   │
+│  run.py / run_cli.py      入口：GUI / 命令行                    │
+│  CHANGELOG.md             版本更新记录                          │
 └──────────────────────────┬────────────────────────────────────┘
                            │ 信号（progress / log / result / error）
 ┌──────────────────────────▼────────────────────────────────────┐

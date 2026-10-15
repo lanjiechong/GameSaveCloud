@@ -517,3 +517,65 @@ class _Wrap(QWidget):
 
 def _wrap(layout):
     return _Wrap(layout)
+
+
+# ==================================================================
+# 关于
+# ==================================================================
+class AboutDialog(QDialog):
+    """版本与项目信息。发布版的「门面」，信息保持克制：版本 + 一句简介 + 链接。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from version import (APP_NAME, APP_TAGLINE, VERSION, AUTHOR,
+                             REPO_URL, ISSUES_URL)
+        self.setWindowTitle("关于 %s" % APP_NAME)
+        self.setMinimumWidth(460)
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+
+        title = QLabel("%s v%s" % (APP_NAME, VERSION))
+        title.setStyleSheet("font-size:20px; font-weight:700;")
+        lay.addWidget(title)
+
+        sub = QLabel(APP_TAGLINE)
+        sub.setStyleSheet("font-size:13px; color:%s;" % PALETTE["muted"])
+        lay.addWidget(sub)
+
+        box = QTextEdit()
+        box.setReadOnly(True)
+        box.setMaximumHeight(150)
+        box.setPlainText(
+            "本机游戏存档的备份、历史版本、回滚与多设备同步工具。\n"
+            "备份、历史、回滚、冲突检测全部在本地完成；\n"
+            "只有在设置里勾选「启用云端同步」后才会访问网络。\n"
+            "\n"
+            "· 备份引擎：分块 + zstd 压缩 + 内容寻址去重\n"
+            "· 冲突处理：keep_local / use_remote / save_both 三种策略\n"
+            "· 调度：定时备份、托盘常驻、开机自启可选\n"
+            "· 游戏图标：内置 Steam 周销量榜 Top100 真实 logo 包，离线可用")
+        lay.addWidget(box)
+
+        info = QLabel("作者：%s" % AUTHOR)
+        info.setStyleSheet("color:%s;" % PALETTE["muted"])
+        lay.addWidget(info)
+
+        links = QHBoxLayout()
+        for text, url in (("项目主页", REPO_URL), ("反馈问题", ISSUES_URL)):
+            b = QPushButton(text)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, u=url: _open_url(u))
+            links.addWidget(b)
+        links.addStretch(1)
+        lay.addLayout(links)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Close)
+        btns.rejected.connect(self.reject)
+        btns.accepted.connect(self.accept)
+        lay.addWidget(btns)
+
+
+def _open_url(url):
+    from PySide6.QtGui import QDesktopServices
+    from PySide6.QtCore import QUrl
+    QDesktopServices.openUrl(QUrl(url))

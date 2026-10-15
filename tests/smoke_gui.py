@@ -110,7 +110,8 @@ def main():
 
     print("== 3. 对话框可构造 ==")
     from ui.dialogs import (ConfirmDialog, ConflictDialog, AddGameDialog,
-                            HistoryDialog, DiffDialog, SettingsDialog)
+                            HistoryDialog, DiffDialog, SettingsDialog,
+                            AboutDialog)
     dialogs = []
     try:
         dialogs.append(ConfirmDialog("测试", "确认", "明细", require_check=True, parent=w))
@@ -122,9 +123,12 @@ def main():
                                      lambda a, b: None, parent=w))
         dialogs.append(DiffDialog(snap, snap, parent=w))
         dialogs.append(SettingsDialog(w.cfg, parent=w))
-        check("7 个对话框全部构造成功", len(dialogs) == 7, "实际 %d" % len(dialogs))
+        dialogs.append(AboutDialog(parent=w))
+        check("8 个对话框全部构造成功", len(dialogs) == 8, "实际 %d" % len(dialogs))
+        check("窗口标题带版本号", "v" in w.windowTitle() and "." in w.windowTitle(),
+              w.windowTitle())
     except Exception as e:      # noqa: BLE001
-        check("7 个对话框全部构造成功", False, repr(e))
+        check("8 个对话框全部构造成功", False, repr(e))
     finally:
         for d in dialogs:
             d.deleteLater()

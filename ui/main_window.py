@@ -31,7 +31,8 @@ from PySide6.QtWidgets import (
 
 from .theme import PALETTE, STYLESHEET, state_color, state_bg, state_label
 from .dialogs import (ConfirmDialog, ConflictDialog, AddGameDialog,
-                      HistoryDialog, DiffDialog, SettingsDialog, _fmt, _human)
+                      HistoryDialog, DiffDialog, SettingsDialog, AboutDialog,
+                      _fmt, _human)
 from .workers import run_async
 from .game_list import GameItemDelegate, ROLE_GAME, ROLE_STATUS, ROLE_CLOUD
 from .logos import LogoService
@@ -64,7 +65,8 @@ def _app_icon() -> QIcon:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("GameSaveCloud —— 游戏存档备份与同步")
+        from version import APP_NAME, APP_TAGLINE, VERSION
+        self.setWindowTitle("%s v%s —— %s" % (APP_NAME, VERSION, APP_TAGLINE))
         self.resize(1120, 760)
         self.setStyleSheet(STYLESHEET)
         self.setWindowIcon(_app_icon())
@@ -144,8 +146,10 @@ class MainWindow(QMainWindow):
         self.b_stop = QPushButton("取消")
         self.b_stop.setEnabled(False)
         self.b_stop.clicked.connect(self.cancel_current)
+        self.b_about = QPushButton("关于")
+        self.b_about.clicked.connect(self.open_about)
         for b in (self.b_backup, self.b_sync, self.b_add, self.b_settings,
-                  self.b_refresh, self.b_stop):
+                  self.b_refresh, self.b_stop, self.b_about):
             bar.addWidget(b)
         bar.addStretch(1)
         self.vault_info = QLabel()
@@ -256,10 +260,12 @@ class MainWindow(QMainWindow):
         menu = QMenu()
         menu.addAction("显示主窗口", self.showNormal)
         menu.addAction("立即同步", self.sync_all)
+        menu.addAction("关于", self.open_about)
         menu.addSeparator()
         menu.addAction("退出", QApplication.quit)
         self.tray.setContextMenu(menu)
-        self.tray.setToolTip("GameSaveCloud")
+        from version import APP_NAME, VERSION
+        self.tray.setToolTip("%s v%s" % (APP_NAME, VERSION))
         self.tray.show()
 
     def _build_timer(self):
@@ -785,6 +791,9 @@ class MainWindow(QMainWindow):
         self.refresh_all()
 
     # ---------- 设置 ----------
+    def open_about(self):
+        AboutDialog(self).exec()
+
     def open_settings(self):
         dlg = SettingsDialog(self.cfg, self)
         if dlg.exec() != SettingsDialog.Accepted:
