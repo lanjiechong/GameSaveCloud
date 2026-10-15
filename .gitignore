@@ -1,0 +1,29 @@
+# Python 运行时
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 打包产物（约 100MB，不提交二进制；用 GameSaveCloud.spec 重新构建即可）
+build/
+dist/
+*.spec.bak
+
+# 应用运行时数据（保险库、数据库、图标缓存实际位于
+# %LOCALAPPDATA%\GameSaveCloud\，不在项目内；此处仅兜底）
+*.db
+*.db-wal
+*.db-shm
+logocache/
+*.log
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.tmp
