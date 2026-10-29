@@ -25,12 +25,12 @@ from PySide6.QtGui import QColor, QAction, QIcon
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView,
-    QGroupBox, QGridLayout, QPlainTextEdit, QSplitter, QMessageBox,
-    QAbstractItemView, QProgressBar, QMenu, QSystemTrayIcon, QApplication,
+    QGroupBox, QGridLayout, QPlainTextEdit, QSplitter, QAbstractItemView, QProgressBar, QMenu, QSystemTrayIcon, QApplication,
     QFrame, QDialog, QDialogButtonBox,
 )
 
 from .theme import PALETTE, STYLESHEET, state_color, state_bg, state_label
+from . import msgbox
 from .dialogs import (ConfirmDialog, ConflictDialog, AddGameDialog,
                       HistoryDialog, DiffDialog, SettingsDialog, AboutDialog,
                       _fmt, _human)
@@ -174,11 +174,19 @@ class MainWindow(QMainWindow):
         root.addLayout(bar)
 
         # ---- 进度条 ----
+        # 放进固定高度的容器里，容器常驻占位。直接 hide() 进度条会让它
+        # 脱离布局，每次刷新/添加游戏出现时整页往下挪 4px，闪得很难看。
+        self.progress_box = QWidget()
+        self.progress_box.setFixedHeight(4)
+        box_lay = QVBoxLayout(self.progress_box)
+        box_lay.setContentsMargins(0, 0, 0, 0)
+        box_lay.setSpacing(0)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(4)
         self.progress.hide()
-        root.addWidget(self.progress)
+        box_lay.addWidget(self.progress)
+        root.addWidget(self.progress_box)
 
         # ---- 主体：左右分栏 ----
         split = QSplitter(Qt.Horizontal)
@@ -558,7 +566,7 @@ class MainWindow(QMainWindow):
         用户确实需要知道刚才那下点击失败了。
         """
         self._log("错误：%s" % e)
-        QMessageBox.critical(self, "出错", str(e))
+        msgbox.error(self, "出错", str(e))
 
     def _err_bg(self, e):
         """后台任务失败 —— 只记日志，绝不弹模态框。
@@ -576,7 +584,7 @@ class MainWindow(QMainWindow):
     def backup_current(self):
         g = self.current_game()
         if not g:
-            QMessageBox.information(self, "未选择", "请先在左侧选择一个游戏。")
+            msgbox.info(self, "未选择", "请先在左侧选择一个游戏。")
             return
         self._set_busy(True, "正在备份 %s …" % g.name)
 
@@ -588,6 +596,7 @@ class MainWindow(QMainWindow):
                                                       sig, "备份 %s" % g.name, c, t))
 
         def done(snap):
+            self._merge_duplicates(g)
             self._log("备份完成：%d 个文件 / %s" % (len(snap.files), _human(snap.total_size)))
             self._prune(g)
             self._set_busy(False)
@@ -595,7 +604,7 @@ class MainWindow(QMainWindow):
             self._update_vault_info()
             tail = ("备份已存入本地保险库。" if not self.cloud_on else
                     "备份已存入本地保险库，点「同步全部」才会传到云端。")
-            QMessageBox.information(self, "备份完成",
+            msgbox.done(self, "备份完成",
                                     "%s 已备份 %d 个文件（%s）。\n\n%s"
                                     % (g.name, len(snap.files),
                                        _human(snap.total_size), tail))
@@ -611,6 +620,22 @@ class MainWindow(QMainWindow):
         else:
             self.progress.setMaximum(0)
             self.progress.setFormat(phase)
+
+    def _merge_duplicates(self, g) -> int:
+        """合并内容完全相同的快照，只留最新一份。返回合并掉的数量。
+
+        连着点「立即备份」、或者存档压根没变又备份一次，都会堆出一排
+        内容相同的条目。刷新时会合并，但用户先看到的是历史列表 ——
+        所以备份一结束就立刻合并，别让人以为「点一次多一份」。
+        """
+        try:
+            n = self.vault.merge_duplicate_snapshots(g.id)
+        except Exception as e:
+            self._log("合并重复备份失败：%s" % e)
+            return 0
+        if n:
+            self._log("已合并 %d 个完全相同的重复备份（只保留最新一份）" % n)
+        return n
 
     def _prune(self, g):
         """按「每款游戏保留快照数」裁剪本地与云端的旧快照。
@@ -651,7 +676,7 @@ class MainWindow(QMainWindow):
         games = self.vault.list_games()
         if not games:
             if not silent:
-                QMessageBox.information(self, "没有游戏", "请先添加要备份的游戏。")
+                msgbox.info(self, "没有游戏", "请先添加要备份的游戏。")
             return
         if not self.cloud_on:
             self._backup_all(games, silent=silent)
@@ -676,7 +701,7 @@ class MainWindow(QMainWindow):
             self._log("全部本地备份完成")
             self.refresh_all()
             if not self._backup_silent:
-                QMessageBox.information(self, "备份完成",
+                msgbox.done(self, "备份完成",
                                         "所有游戏已备份到本地保险库。")
             return
         g = self._backup_queue.pop(0)
@@ -688,6 +713,7 @@ class MainWindow(QMainWindow):
                     self._task_progress(sig, "备份 %s" % g.name, c, t))
 
         def done(snap):
+            self._merge_duplicates(g)
             self._log("%s 已备份：%d 个文件 / %s"
                       % (g.name, len(snap.files), _human(snap.total_size)))
             self._prune(g)
@@ -714,7 +740,7 @@ class MainWindow(QMainWindow):
             self._log("全部同步完成")
             self.refresh_all()
             if not self._sync_silent:
-                QMessageBox.information(self, "同步完成", "所有游戏已同步。")
+                msgbox.done(self, "同步完成", "所有游戏已同步。")
             return
         g = self._sync_queue.pop(0)
 
@@ -742,7 +768,7 @@ class MainWindow(QMainWindow):
                     self._log("! %s" % e)
                 self._set_busy(False)
                 if not self._sync_silent:
-                    QMessageBox.warning(self, "同步未完成",
+                    msgbox.warn(self, "同步未完成",
                                         "%s 有 %d 项失败，已保留现场，下次重试：\n%s"
                                         % (g.name, len(r["errors"]), "\n".join(r["errors"][:5])))
                 self.refresh_all()
@@ -788,7 +814,7 @@ class MainWindow(QMainWindow):
             return
         snaps = self.vault.list_snapshots(g.id)
         if not snaps:
-            QMessageBox.information(self, "没有历史版本", "请先执行一次备份。")
+            msgbox.info(self, "没有历史版本", "请先执行一次备份。")
             return
         HistoryDialog(g, snaps, self._do_rollback, self._show_diff, self).exec()
 
@@ -826,7 +852,7 @@ class MainWindow(QMainWindow):
             self._prune(g)
             self._set_busy(False)
             self.refresh_all()
-            QMessageBox.information(self, "回滚完成",
+            msgbox.done(self, "回滚完成",
                                     "已还原 %d 个文件（%s）。\n%d 个被覆盖的文件已留底在 "
                                     "localcopies/ 目录。" % (st["restored"],
                                                          _human(st["bytes"]), st["backed_up"]))
@@ -841,7 +867,7 @@ class MainWindow(QMainWindow):
             return
         snaps = self.vault.list_snapshots(g.id)
         if not snaps:
-            QMessageBox.information(self, "暂无数据", "请先执行一次备份。")
+            msgbox.info(self, "暂无数据", "请先执行一次备份。")
             return
         s = snaps[0]
         from .dialogs import DiffDialog  # 复用表格展示
@@ -878,7 +904,7 @@ class MainWindow(QMainWindow):
         def done(found):
             self._set_busy(False)
             if not found:
-                QMessageBox.information(self, "没有发现",
+                msgbox.info(self, "没有发现",
                                         "没有扫描到新的存档目录，可用「添加自定义」手动指定。")
             dlg = AddGameDialog(found, self)
             if dlg.exec() != AddGameDialog.Accepted:
@@ -901,7 +927,7 @@ class MainWindow(QMainWindow):
                 "将从列表移除该游戏，已备份的快照与 chunk 会保留在保险库中。",
                 "游戏：%s\n路径：%s\n\n这不会删除任何已备份的数据，"
                 "之后可以重新添加。" % (g.name, "\n".join(g.paths)),
-                require_check=True, parent=self):
+                parent=self):
             return
         self.vault.remove_game(g.id, keep_snapshots=True)
         self._log("已移除游戏：%s" % g.name)
@@ -921,7 +947,7 @@ class MainWindow(QMainWindow):
         dlg.apply()
         self._log("设置已保存")
         if old_vault != self.cfg.vault_root:
-            QMessageBox.information(self, "需要重启",
+            msgbox.info(self, "需要重启",
                                     "本地保险库目录已更改，请重启应用生效。")
             return
         if old_cloud != self.cloud_on or old_remote != self.cfg.remote_conf.get("path"):

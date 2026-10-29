@@ -3,6 +3,22 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.2] - 2026-10-30
+
+### 变更
+
+- **提示框改为自绘**（`ui/msgbox.py`）：全部 QMessageBox 换成
+  MessageDialog。Windows 上 QMessageBox 会触发系统提示音 —— 备份完成、
+  同步完成这种「好事」也照样响一声。自绘对话框不碰任何系统声音接口，
+  配色跟随应用主题，成功类提示用绿色对勾区分。
+- **移除游戏不再要求勾选确认**：二次确认弹窗保留，但不用先打勾才能点
+  「继续」。
+- **进度条预留占位**：进度条外层套了固定 4px 高的容器。之前直接
+  `hide()` 会让它脱离布局，刷新/添加游戏时整页往下挪一截。
+- **立即备份后立刻合并重复快照**：连着点「立即备份」、或存档没变又
+  备份一次，内容相同的快照会堆成多份，之前要等下次刷新才合并。
+  现在备份一结束就合并，历史列表只留最新一份。
+
 ## [1.3.1] - 2026-10-30
 
 ### 修复
@@ -188,6 +204,7 @@
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.3.2]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.2
 [1.3.1]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.1
 [1.3.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.0
 [1.2.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.2.0

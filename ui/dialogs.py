@@ -10,11 +10,12 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QListWidget,
     QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
     QLineEdit, QSpinBox, QComboBox, QFileDialog, QGroupBox, QFormLayout,
-    QTextEdit, QDialogButtonBox, QMessageBox, QAbstractItemView, QSplitter,
+    QTextEdit, QDialogButtonBox, QAbstractItemView, QSplitter,
     QWidget, QRadioButton, QButtonGroup,
 )
 
 from .theme import PALETTE, state_color, state_bg
+from . import msgbox
 from gamesave import chunker
 from gamesave.models import (
     RESOLVE_KEEP_LOCAL, RESOLVE_USE_REMOTE, RESOLVE_SAVE_BOTH)
@@ -74,7 +75,7 @@ class ConfirmDialog(QDialog):
 
     def _on_accept(self):
         if self.check is not None and not self.check.isChecked():
-            QMessageBox.information(self, "需要确认", "请先勾选确认框，再点击「继续」。")
+            msgbox.info(self, "需要确认", "请先勾选确认框，再点击「继续」。")
             return
         self.accept()
 
@@ -229,7 +230,7 @@ class AddGameDialog(QDialog):
     def _add_custom(self):
         p = self.custom.text().strip()
         if not p or not os.path.isdir(p):
-            QMessageBox.warning(self, "路径无效", "请输入一个已存在的目录。")
+            msgbox.warn(self, "路径无效", "请输入一个已存在的目录。")
             return
         from gamesave.scanner import FoundGame
         fg = FoundGame(os.path.basename(p.rstrip("\\/")), "自定义", [p], 1, 0, "custom")
@@ -312,19 +313,19 @@ class HistoryDialog(QDialog):
     def _diff(self):
         s = self._current()
         if not s:
-            QMessageBox.information(self, "未选择", "请先选择一行。")
+            msgbox.info(self, "未选择", "请先选择一行。")
             return
         idx = self.snapshots.index(s)
         prev = self.snapshots[idx + 1] if idx + 1 < len(self.snapshots) else None
         if not prev:
-            QMessageBox.information(self, "无法对比", "这是最早的一版，没有可对比的对象。")
+            msgbox.info(self, "无法对比", "这是最早的一版，没有可对比的对象。")
             return
         self.on_diff(prev, s)
 
     def _rollback(self):
         s = self._current()
         if not s:
-            QMessageBox.information(self, "未选择", "请先选择要回滚到的版本。")
+            msgbox.info(self, "未选择", "请先选择要回滚到的版本。")
             return
         self.on_rollback(s)
 
@@ -483,13 +484,12 @@ class SettingsDialog(QDialog):
         if (self.cloud_on.isChecked()
                 and self.backend.currentData() == "webdav"
                 and self.dav_url.text().strip().lower().startswith("http://")):
-            r = QMessageBox.warning(
-                self, "明文连接警告",
-                "WebDAV 地址是 http:// 而非 https://。\n\n"
-                "账号、密码以及存档内容都将以明文在网络上传输，"
-                "同一网络中的其他人可以截获。\n\n确定仍要使用这个地址吗？",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if r != QMessageBox.Yes:
+            if not ConfirmDialog.ask(
+                    "明文连接警告",
+                    "WebDAV 地址是 http:// 而非 https://。",
+                    "账号、密码以及存档内容都将以明文在网络上传输，"
+                    "同一网络中的其他人可以截获。\n\n确定仍要使用这个地址吗？",
+                    parent=self):
                 return
         self.accept()
 

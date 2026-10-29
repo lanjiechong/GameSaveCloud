@@ -54,12 +54,12 @@ def main():
     app = QApplication(sys.argv)
 
     # 无头环境下模态框会永久霸占事件循环（用户没得点它），
-    # 把 QMessageBox 的静态方法换成「记一笔就返回」，只验证代码路径走得通。
-    from PySide6.QtWidgets import QMessageBox
+    # 把提示框的四个入口换成「记一笔就返回」，只验证代码路径走得通。
+    from ui import msgbox
     shown_modals = []
-    for name in ("information", "critical", "warning", "question"):
-        setattr(QMessageBox, name,
-                staticmethod(lambda *a, _n=name, **k: shown_modals.append(_n)))
+    for _name in ("info", "warn", "error", "done"):
+        setattr(msgbox, _name,
+                lambda *a, _n=_name, **k: shown_modals.append(_n))
 
     w = MainWindow()
     w._shown_modals = shown_modals
@@ -318,6 +318,33 @@ def main():
           repr((hit or {}).get("source")))
     check("索引认不出的名字返回 None",
           gameindex.lookup("这款游戏肯定不在榜单上 XYZ") is None)
+
+    print("== 9. UI 细节：进度条占位 / 移除确认 / 备份去重 ==")
+    check("进度条占位容器常驻", w.progress_box.height() == 4,
+          "h=%d" % w.progress_box.height())
+    before_h = w.progress_box.height()
+    w.progress.show()
+    shown_h = w.progress_box.height()
+    w.progress.hide()
+    check("进度条显隐不改变布局高度",
+          before_h == shown_h == 4, "%d -> %d" % (before_h, shown_h))
+
+    from ui.dialogs import ConfirmDialog
+    d = ConfirmDialog("移除游戏 —— X", "将从列表移除该游戏。", "游戏：X", parent=w)
+    check("移除确认不再要求勾选", d.check is None, repr(d.check))
+    d.deleteLater()
+
+    n0 = len(w.vault.list_snapshots(g.id))
+    w.backup_current()
+    pump(ms=3500, rounds=7)
+    n1 = len(w.vault.list_snapshots(g.id))
+    w.backup_current()
+    pump(ms=3500, rounds=7)
+    n2 = len(w.vault.list_snapshots(g.id))
+    check("连续备份不会堆出内容重复的快照", n2 <= n1,
+          "%d -> %d -> %d" % (n0, n1, n2))
+    check("备份完成用的是静音提示框（已打桩）",
+          "done" in shown_modals, "modals=%r" % (shown_modals[-4:],))
 
     # --- 汇总 ---
     print()
