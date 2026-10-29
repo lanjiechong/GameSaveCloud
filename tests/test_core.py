@@ -1279,5 +1279,105 @@ class TestBangumiSupplement(unittest.TestCase):
         self.assertEqual(r["status"], gamemeta.STATUS_NOT_FOUND)
 
 
+# ==================================================================
+# 19. 搜索词变形：目录名连写 / 冗余后缀
+# ==================================================================
+class TestSearchTerms(unittest.TestCase):
+    def test_camel_split(self):
+        self.assertEqual(gamemeta._camel_split("SplitFiction"), "Split Fiction")
+        self.assertEqual(gamemeta._camel_split("TheFarmerWasReplaced"),
+                         "The Farmer Was Replaced")
+        self.assertEqual(gamemeta._camel_split("AIHASTO"), "")   # 全大写拆不开
+        self.assertEqual(gamemeta._camel_split("荒野大镖客2"), "")
+
+    def test_strip_suffix(self):
+        self.assertEqual(gamemeta._strip_suffix("MiSideFull"), "MiSide")
+        self.assertEqual(gamemeta._strip_suffix("Pummel Party"), "")
+        self.assertEqual(gamemeta._strip_suffix("Game"), "")     # 太短不动
+
+    def test_variants_come_first(self):
+        terms = gamemeta.search_terms("SplitFiction")
+        self.assertEqual(terms[0], "Split Fiction")
+        self.assertIn("SplitFiction", terms)
+
+    def test_suffix_variant(self):
+        self.assertEqual(gamemeta.search_terms("MiSideFull")[0], "MiSide")
+
+    def test_plain_name_untouched(self):
+        terms = gamemeta.search_terms("荒野大镖客2 Red Dead Redemption 2")
+        self.assertEqual(terms[0], "Red Dead Redemption 2")
+
+
+# ==================================================================
+# 20. 相似度不能只看"共享一个词"
+# ==================================================================
+class TestSimilarityGuard(unittest.TestCase):
+    def test_shared_suffix_word_rejected(self):
+        """Supermarket Together 和 Don't Starve Together 共享 Together。"""
+        self.assertFalse(gamemeta.name_match(
+            "Supermarket Together", "Don't Starve Together"))
+
+    def test_shared_noun_rejected(self):
+        """Ogu Forest 和 The Forest 共享 Forest。"""
+        self.assertFalse(gamemeta.name_match("Ogu Forest", "The Forest"))
+
+    def test_real_variants_still_pass(self):
+        self.assertTrue(gamemeta.name_match("SplitFiction", "Split Fiction"))
+        self.assertTrue(gamemeta.name_match("MiSideFull", "MiSide"))
+        self.assertTrue(gamemeta.name_match("只狼", "只狼：影逝二度"))
+
+
+# ==================================================================
+# 21. 从存档路径推断游戏名
+# ==================================================================
+class TestPathHints(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gsc_hint_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_locallow_uses_subdirectory(self):
+        """LocalLow\\AIHASTO 的真游戏名在下一层 MiSideFull。"""
+        root = os.path.join(self.tmp, "LocalLow", "AIHASTO")
+        os.makedirs(os.path.join(root, "MiSideFull"))
+        hints = gamemeta.path_hints([root])
+        self.assertEqual(hints[0], "MiSideFull")
+
+    def test_non_locallow_ignores_subdirs(self):
+        """Roaming 下的子目录是软件缓存，不能当游戏名。"""
+        root = os.path.join(self.tmp, "Roaming", "ACLOS")
+        os.makedirs(os.path.join(root, "Code Cache"))
+        os.makedirs(os.path.join(root, "Crashpad"))
+        hints = gamemeta.path_hints([root])
+        self.assertEqual(hints[0], "ACLOS")
+        self.assertNotIn("Code Cache", hints)
+        self.assertNotIn("Crashpad", hints)
+
+    def test_generic_dirs_skipped(self):
+        root = os.path.join(self.tmp, "Local", "HogwartsLegacy", "Saved",
+                            "SaveGames")
+        os.makedirs(os.path.join(root, "Slot1"))
+        hints = gamemeta.path_hints([root])
+        self.assertIn("HogwartsLegacy", hints)
+        for junk in ("SaveGames", "Saved", "Slot1"):
+            self.assertNotIn(junk, hints)
+
+    def test_username_skipped(self):
+        user = os.environ.get("USERNAME") or ""
+        if not user:
+            self.skipTest("没有 USERNAME 环境变量")
+        root = os.path.join(self.tmp, "LocalLow", user, "SomeGame")
+        os.makedirs(root)
+        hints = gamemeta.path_hints([root])
+        self.assertNotIn(user.lower(), [h.lower() for h in hints])
+
+    def test_hint_count_capped(self):
+        root = os.path.join(self.tmp, "LocalLow", "Studio")
+        for i in range(8):
+            os.makedirs(os.path.join(root, "Game%d" % i))
+        self.assertLessEqual(len(gamemeta.path_hints([root], limit=3)), 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

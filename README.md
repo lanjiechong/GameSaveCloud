@@ -5,7 +5,7 @@
 
 约 6200 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
 
-**当前版本 v1.3.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
+**当前版本 v1.3.1** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -68,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 110 个核心引擎单元测试
+python tests/test_core.py                                # 123 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -456,7 +456,7 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 ## 8. 测试
 
 ```bash
-python tests/test_core.py                  # 110 个单元测试
+python tests/test_core.py                  # 123 个单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 ```
 
@@ -632,6 +632,15 @@ spec 也不会把它打进 exe。想要离线即有真实图标，可把预取�
   Steam 打一遍注定失败的请求；退避到期后刷新会自动重试。
 - 「查到了但官方没中文名」（大量独立游戏国区只有英文名）记为 `ok`，
   不算失败 —— 否则这类游戏会**永远**被判成「缺中文名」而无限重试。
+
+**目录名不等于游戏名**（这条最容易被忽略）：
+
+LocalLow 是 `LocalLow\<工作室>\<游戏>` 两级结构。扫描器早期只取到工作室
+那一层，于是「AIHASTO」「House House」「Team Salvato」被登记成游戏 ——
+这些在 Steam 上对应的是**发行商**，搜一条都搜不到，实际游戏是
+MiSide / Big Walk / DDLC Plus。现在两层都兜：扫描器下钻一层取真游戏目录，
+匹配层还会从存档路径里的子目录名推断游戏名（`path_hints`），
+把已经存在的旧记录也救回来。
 
 **为什么必须拆词搜**（实测踩出来的坑）：
 
@@ -819,6 +828,6 @@ Python 运行时为 PSF）的完整声明、动态链接合规说明与 Qt 可�
 **关于 AI 辅助开发的说明**：本项目在开发过程中使用了 AI 编程助手
 参与代码编写与问题排查。需求取舍、架构设计、安全模型（留底机制、
 三方合并基准、内容哈希判定等）与最终代码均由人类作者审阅、测试并负责；
-全部核心行为由 `tests/test_core.py` 的 110 个单元测试钉住。如发现任何
+全部核心行为由 `tests/test_core.py` 的 123 个单元测试钉住。如发现任何
 疑似侵权内容，请在 [Issues](https://github.com/lanjiechong/GameSaveCloud/issues)
 反馈，核实后立即处理。

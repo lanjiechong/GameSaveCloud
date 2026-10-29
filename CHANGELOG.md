@@ -3,6 +3,29 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.1] - 2026-10-30
+
+### 修复
+
+- **工作室名被当成游戏名**（根因）：扫描器对 LocalLow（Unity 的
+  `<工作室>\<游戏>` 布局）只取到第一层，于是「AIHASTO」「House House」
+  「Team Salvato」这类**发行商名**被登记成游戏，Steam 上当然一条都搜不到。
+  现在会下钻一层取真正的游戏目录（MiSideFull / Big Walk / DDLC Plus）。
+  已经存在的记录不重建，靠匹配层从存档路径推断游戏名救回来。
+- **相似度只看「共享一个词」**：`Supermarket Together` 与
+  `Don't Starve Together` 共享 Together 就判成同一款，`Ogu Forest` 与
+  `The Forest` 同理，导致图标张冠李戴。现在要求首字符相同、
+  长度比 ≥ 0.6、相似度 ≥ 0.75。
+- **连写目录名搜不到**：`SplitFiction`、`TheFarmerWasReplaced` 这类
+  去空格的驼峰名原样搜必然落空，现在先拆词再搜；`MiSideFull` 这类
+  带冗余后缀的先去掉 Full / Plus / Game 再搜。
+- **软件目录污染候选词**：`Roaming` 下的 `Code Cache` / `Crashpad`
+  等缓存目录名被当成游戏名去搜，曾把加速器 ACLOS 认成 R.E.P.O.。
+  子目录线索现在只对 LocalLow 启用。
+- **网络抖动被记成失败**：Steam 偶发丢连接时一次失败就判 error，
+  用户看到「失败 N 款」这种假失败。取数增加一次重试。
+- 移除 Rockstar `Social Club` 目录的误报条目（那是账号配置，不是存档）。
+
 ## [1.3.0] - 2026-10-30
 
 ### 新增
@@ -165,6 +188,7 @@
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.3.1]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.1
 [1.3.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.0
 [1.2.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.2.0
 [1.1.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.1.0

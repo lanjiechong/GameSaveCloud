@@ -19,6 +19,7 @@ r"""
     直接返回本地化后的商店名 —— 这就是我们要的「中文名」。
 """
 import json
+import os
 import re
 import time
 import urllib.error
@@ -121,7 +122,16 @@ def name_match(query: str, candidate: str) -> bool:
     # 所以只允许够长的候选走这条路
     if c in q and len(c) >= 4:
         return True
-    return similar(q, c) >= 0.62
+    # 相似度兜底。必须加首字符与长度约束 —— 否则共享一个词就会被认成同一款：
+    #   "Supermarket Together" vs "Don't Starve Together"（共享 Together）
+    #   "Ogu Forest"           vs "The Forest"（共享 Forest）
+    # 实测这两对都能混过 0.62 的阈值，把 A 游戏的图标安到 B 头上。
+    if q[0] != c[0]:
+        return False
+    short, long_ = sorted((len(q), len(c)))
+    if short / long_ < 0.6:
+        return False
+    return similar(q, c) >= 0.75
 
 
 # 常见缩写：Steam 搜索只认全名，而扫描器的游戏名/目录名常用缩写。
@@ -136,6 +146,33 @@ ALIASES = {
 }
 
 
+def _camel_split(text: str) -> str:
+    """连写名拆词：SplitFiction -> Split Fiction。
+
+    目录名经常是去空格的驼峰写法，原样丢进 Steam 搜不到任何东西。
+    全大写（AIHASTO / DDTNL）拆不开，返回空串表示"没变体"。
+    """
+    t = (text or "").strip()
+    if not t or " " in t or has_cjk(t):
+        return ""
+    split = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", t)
+    return split if split != t else ""
+
+
+# 目录名常带这些冗余尾词，Steam 上的正式名没有（MiSideFull -> MiSide）
+_SUFFIXES = ("full", "game", "plus", "remastered", "definitive", "complete")
+
+
+def _strip_suffix(text: str) -> str:
+    """去掉整词尾的冗余后缀；动不到词中间，也要求剩下够长。"""
+    t = (text or "").strip()
+    low = t.lower()
+    for suf in _SUFFIXES:
+        if low.endswith(suf) and len(t) > len(suf) + 2:
+            return t[:-len(suf)].strip()
+    return ""
+
+
 def search_terms(name: str) -> list:
     """从游戏名生成搜索候选词，越可能命中的越靠前。
 
@@ -143,20 +180,37 @@ def search_terms(name: str) -> list:
     （如「荒野大镖客2 Red Dead Redemption 2」）。Steam 的搜索只认官方名，
     把整个组合名丢进去一个结果都没有（实测：term=荒野大镖客2 Red Dead
     Redemption 2 → 空；单独搜 Red Dead Redemption 2 → 1174180）。
-    所以拆成：别名全名 → 英文部分 → 全名 → 中文部分。
+
+    顺序：变形词（拆驼峰 / 去后缀）→ 别名全名 → 英文部分 → 全名 → 中文部分。
+    变形词排最前，因为目录名连写是最常见的形态（SplitFiction、
+    TheFarmerWasReplaced），原样搜必然落空。
     """
     words = (name or "").split()
     ascii_run = " ".join(w for w in words if w.isascii() and w.strip())
     zh_run = "".join(w for w in words if not w.isascii() and w.strip())
-    terms = []
+
+    base = []
     alias = ALIASES.get(norm_name(name))
     if alias:
-        terms.append(alias)
+        base.append(alias)
     for t in (ascii_run, name, zh_run):
         t = (t or "").strip()
-        if t and t not in terms:
-            terms.append(t)
-    return terms
+        if t and t not in base:
+            base.append(t)
+
+    variants = []
+    for t in base:
+        # 去后缀优先于拆驼峰：MiSideFull 想要的是 MiSide，
+        # 而不是把它拆成 "Mi Side Full"（那个也留着，只是排在后面）
+        for v in (_strip_suffix(t), _camel_split(t)):
+            if v and v not in variants and v not in base:
+                variants.append(v)
+
+    out = []
+    for t in variants + base:
+        if t and t not in out:
+            out.append(t)
+    return out
 
 
 def pick_chinese(names) -> str:
@@ -179,11 +233,28 @@ def logo_urls(appid) -> tuple:
 # ==================================================================
 # 网络
 # ==================================================================
-def default_fetch(url: str) -> bytes:
-    """默认取数函数。失败抛异常，由 lookup() 统一归类。"""
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-        return r.read()
+def default_fetch(url: str, retries: int = 1) -> bytes:
+    """默认取数函数。失败重试一次再抛异常，由 lookup() 统一归类。
+
+    Steam 在国内偶发丢连接（实测同一接口 1s / 8s / 超时轮着来），
+    不重试的话一次抖动就会把整款游戏判成 error，用户看到的就是
+    「失败 N 款」—— 这是最容易被误认为「功能没做好」的假失败。
+    """
+    last = None
+    for i in range(retries + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return b""          # 明确没有这个资源，不算错误
+            last = e
+        except Exception as e:
+            last = e
+        if i < retries:
+            time.sleep(0.8)
+    raise last if last else OSError("请求失败")
 
 
 def _parse_items(raw):
@@ -328,13 +399,18 @@ def _match_prefer_first(term: str, items, fetch):
 
 
 def lookup(name: str, fetch=None, local_index=None,
-           use_bangumi: bool = False) -> dict:
+           use_bangumi: bool = False, hints=None) -> dict:
     """查一款游戏在 Steam 上的身份。
 
     三层，从快到慢：
         1. local_index（可选）—— 本地离线索引，命中即返回，零网络
         2. Steam storesearch + appdetails —— 主源，覆盖面最广
         3. Bangumi（可选，默认关）—— 只补中文名
+
+    hints：额外的候选名，通常是「从存档路径推断出来的游戏名」。
+        LocalLow 的结构是 LocalLow\\<工作室>\\<游戏>，扫描器早期只取到
+        工作室名（AIHASTO / House House），拿这个去 Steam 搜当然搜不到。
+        调用方把路径里的真实目录名传进来，这里按顺序试，命中即止。
 
     返回 dict：
         status        ok / not_found / error
@@ -351,23 +427,36 @@ def lookup(name: str, fetch=None, local_index=None,
     fetch = fetch or default_fetch
     res = {"status": STATUS_NOT_FOUND, "appid": "", "name_zh": "",
            "official_name": "", "error": "", "source": ""}
-    name = (name or "").strip()
-    if not name:
+
+    # 候选名：路径线索优先（更可能是真游戏名），原名垫后
+    cands = []
+    for h in list(hints or ()) + [name]:
+        h = (h or "").strip()
+        if h and h not in cands:
+            cands.append(h)
+    if not cands:
         return res
 
     # 1. 本地索引优先。不产生网络请求，断网时也能认出榜单上的游戏。
     if local_index is not None:
-        try:
-            hit = local_index(name)
-        except Exception:
-            hit = None
-        if hit:
-            return hit
+        for c in cands:
+            try:
+                hit = local_index(c)
+            except Exception:
+                hit = None
+            if hit:
+                return hit
 
-    # 2. Steam
+    # 2. Steam：所有候选名展开成搜索词，按「变形词 → 原名」的顺序试
+    terms = []
+    for c in cands:
+        for t in search_terms(c):
+            if t and t not in terms:
+                terms.append(t)
+
     any_parsed = False
     last_error = ""
-    for term in search_terms(name):
+    for term in terms:
         try:
             raw = fetch(SEARCH_URL % urllib.parse.quote(term))
         except Exception as e:
@@ -386,12 +475,12 @@ def lookup(name: str, fetch=None, local_index=None,
             official = (first.get("name") or "").strip()
             return _with_bangumi(_ok(first.get("id"), official,
                                      [first.get("_local"), official]),
-                                 name, fetch, use_bangumi)
+                                 term, fetch, use_bangumi)
         hit = _best_match(term, items)
         if hit:
             official = (hit.get("name") or "").strip()
             return _with_bangumi(_ok(hit.get("id"), official, [official]),
-                                 name, fetch, use_bangumi)
+                                 term, fetch, use_bangumi)
 
     # 所有候选词都解析失败才算网络错误；只要有一轮成功解析，
     # 那就是「确实没搜到」，属于 not_found，不该触发重试退避的 error 分支。
@@ -414,6 +503,74 @@ def _with_bangumi(res: dict, name: str, fetch, enabled: bool) -> dict:
         res["name_zh"] = zh
         res["source"] = "steam+bangumi"
     return res
+
+
+# ==================================================================
+# 从存档路径推断游戏名
+# ==================================================================
+# 路径里这些段不是游戏名，别拿去搜 Steam。
+# 后半段是 Chromium / Electron / Unity 的缓存目录 —— 有些软件会把它们
+# 直接铺在 Roaming 根下，拿去搜 Steam 会撞上同名的小游戏（实测
+# "Crashpad" 命中了 Steam 上的 "Crashpad: Cozy Idle Outpost"）。
+GENERIC_DIRS = {
+    "save", "saves", "saved", "savegames", "savegame", "savedata",
+    "savefiles", "data", "userdata", "profile", "profiles", "settings",
+    "config", "configs", "cache", "caches", "logs", "log", "storage",
+    "remote", "local", "locallow", "roaming", "temp", "tmp", "documents",
+    "saved games", "my games", "steam", "steamapps", "common", "backup",
+    "backups", "slot", "slots", "bin", "content", "appdata", "users",
+    "code cache", "gpucache", "shadercache", "crashpad", "crash reports",
+    "dictionaries", "blob_storage", "local storage", "session storage",
+    "indexeddb", "service worker", "unity", "il2cpp", "mono", "resources",
+    "streamingassets", "webcache", "gpu cache", "dawncache", "grshadercache",
+    "launcher", "titles", "social club",
+}
+
+_USERNAME = (os.environ.get("USERNAME") or "").strip().lower()
+
+
+def path_hints(paths, limit: int = 4) -> list:
+    """从存档路径推断可能的游戏名。
+
+    LocalLow 的结构是 ``LocalLow\\<工作室>\\<游戏>``。扫描器早期版本只取到
+    工作室那一层（AIHASTO / House House / Team Salvato），拿它去 Steam 搜
+    必然落空 —— 这些名字在 Steam 上对应的是发行商，不是任何一款游戏。
+
+    真游戏名在下一层目录里，这里把它捞出来当搜索词：
+        LocalLow\\AIHASTO       -> MiSideFull
+        LocalLow\\House House   -> Big Walk
+        LocalLow\\Team Salvato  -> Doki Doki Literature Club Plus
+
+    子目录只在 LocalLow 下取。Roaming / Local 的子目录是软件自己的缓存
+    （Code Cache、Crashpad、GameProxyCrashReports…），拿它们去搜只会撞上
+    同名小游戏 —— 实测 ACLOS（一个加速器）就这样被认成 R.E.P.O.。
+
+    优先级：LocalLow 子目录 > 路径末段从后往前。通用目录与用户名跳过。
+    """
+    hints = []
+
+    def push(n):
+        n = (n or "").strip()
+        if not n or len(n) < 3 or n.isdigit() or n in hints:
+            return
+        low = n.lower()
+        if low in GENERIC_DIRS or (_USERNAME and low == _USERNAME):
+            return
+        hints.append(n)
+
+    for p in paths or ():
+        if "locallow" in (p or "").replace("\\", "/").lower():
+            try:
+                subs = sorted(d for d in os.listdir(p)
+                              if os.path.isdir(os.path.join(p, d)))
+            except OSError:
+                subs = []
+            for d in subs:
+                push(d)
+        parts = [x for x in os.path.normpath(p).split(os.sep) if x]
+        for name in reversed(parts[-6:]):
+            push(name)
+    return hints[:limit]
 
 
 # ==================================================================

@@ -97,8 +97,7 @@ KNOWN_GAMES = [
     ("泰拉瑞亚 Terraria", "Steam", ["Terraria"], "Documents\\My Games"),
     (" Minecraft Java 版", "Mojang", [".minecraft\\saves"], "AppData\\Roaming"),
     ("Valheim 英灵神殿", "Steam", ["Valheim"], "AppData\\LocalLow\\IronGate"),
-    ("荒野大镖客：救赎 RDR1", "Rockstar", ["Rockstar Games\\Red Dead Redemption"], "Documents"),
-    ("双人成行 It Takes Two", "Steam", ["It Takes Two"], "AppData\\Local"),
+    ("荒野大镖客：救赎 RDR1", "Rockstar", ["Rockstar Games\\Red Dead Redemption"], "Documents"),    ("双人成行 It Takes Two", "Steam", ["It Takes Two"], "AppData\\Local"),
     ("逃出生天 A Way Out", "Steam", ["A Way Out"], "AppData\\Local"),
     ("双影奇境 Split Fiction", "Steam", ["SplitFiction"], "AppData\\Local"),
     ("霍格沃茨之遗 Hogwarts Legacy", "Steam/Epic", ["HogwartsLegacy\\Saved\\SaveGames"], "AppData\\Local"),
@@ -135,7 +134,8 @@ KNOWN_GAMES = [
     ("欧卡2 Euro Truck Simulator 2", "Steam", ["Euro Truck Simulator 2"], "Documents\\Euro Truck Simulator 2"),
     ("美卡 American Truck Simulator", "Steam", ["American Truck Simulator"], "Documents\\American Truck Simulator"),
     ("微软飞行模拟 MSFS", "Steam/Xbox", ["Flight Simulator"], "AppData\\Local\\Packages"),
-    ("荒野大镖客2 云", "Rockstar", ["Rockstar Games\\Social Club"], "Documents"),
+    # 注：Rockstar 的 "Social Club" 目录只是账号/配置，不是存档，
+    # 早先把它当「荒野大镖客2 云」报出来属于误报，已删除。
     ("方舟：生存进化 Ark: Survival Evolved", "Steam", ["ARK"], "AppData\\Local"),
     ("英灵神殿 Valheim 世界", "Steam", ["Valheim\\worlds"], "AppData\\LocalLow\\IronGate"),
     ("噬血代码 Code Vein", "Steam", ["CodeVein"], "AppData\\Roaming\\Bandai Namco Entertainment"),
@@ -378,11 +378,40 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
                 p = os.path.join(root, name)
                 if not os.path.isdir(p):
                     continue
+                # LocalLow 的布局是 <工作室>\<游戏>。工作室那一层不是游戏名 ——
+                # 拿「AIHASTO」「House House」去 Steam 搜一条都搜不到，
+                # 实际游戏分别是 MiSide、Big Walk。所以先下钻一层找真正的
+                # 游戏目录，找到就不再把这个工作室名当游戏。
+                # 只对 LocalLow 下钻：AppData 下面同样是「厂商\产品」结构，
+                # 但那里的厂商目录里塞的是各种软件，下钻只会扫出更多噪音。
+                if _is_locallow(root):
+                    got_sub = False
+                    try:
+                        subs = sorted(os.listdir(p))
+                    except OSError:
+                        subs = []
+                    for sub in subs:
+                        if sub.lower() in NOISE:
+                            continue
+                        sp = os.path.join(p, sub)
+                        if not os.path.isdir(sp):
+                            continue
+                        f2, s2 = _looks_like_save_dir(sp, max_files=60)
+                        if f2:
+                            add(sub, tag, [sp], f2, s2, "heuristic")
+                            got_sub = True
+                    if got_sub:
+                        continue
                 files, size = _looks_like_save_dir(p, max_files=60)
                 if files:
                     add(name, tag, [p], files, size, "heuristic")
 
     return [found[k] for k in order]
+
+
+def _is_locallow(path: str) -> bool:
+    """这个根是不是 LocalLow（Unity 游戏专用的 <工作室>\\<游戏> 布局）。"""
+    return "locallow" in (path or "").replace("\\", "/").lower()
 
 
 def _resolve_anchor(root: str, anchor: str):

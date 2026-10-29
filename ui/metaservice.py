@@ -22,6 +22,7 @@ import time
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
 from gamesave import gamemeta, gameindex
+from gamesave.gamemeta import path_hints
 from .workers import Worker
 
 
@@ -107,7 +108,8 @@ class MetaService(QObject):
             # 这里用不到但必须收下，否则 TypeError。
             res = self._lookup(game.name, fetch=self.logos.fetch_bytes,
                                local_index=self._local_index,
-                               use_bangumi=self._use_bangumi)
+                               use_bangumi=self._use_bangumi,
+                               hints=path_hints(getattr(game, "paths", ())))
             img = None
             if res.get("status") == gamemeta.STATUS_OK and res.get("appid"):
                 img = self.logos.fetch_logo_image(res.get("appid"))
