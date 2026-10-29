@@ -217,7 +217,58 @@ def _ok(appid, official: str, zh_candidates) -> dict:
             "appid": str(appid or ""),
             "official_name": (official or "").strip(),
             "name_zh": pick_chinese(zh_candidates or ()),
-            "error": ""}
+            "error": "",
+            "source": "steam"}
+
+
+# ==================================================================
+# 补充源：Bangumi（只补中文名）
+# ==================================================================
+# 为什么不接其它几家（2026-10-30 本机实测）：
+#   api.bgm.tv            连接超时
+#   www.wikidata.org      连接超时，且要「搜 QID → 再取 zh label」两步
+#   en.wikipedia.org      连接超时
+#   api.rawg.io           连接超时，且需要 API key（免费额度 2 万次/月）
+#   steamspy.com          403（Cloudflare 挑战页，拿不到 JSON）
+# 能连上的只有 Steam 官方接口。Bangumi 结构最简单（一次请求、免密钥、
+# 直接返回 name_cn），所以作为唯一的中文名补充源接入，**默认关闭** ——
+# 打不通的源常开会给每次刷新白加一个超时。
+BANGUMI_SEARCH = ("https://api.bgm.tv/search/subject/%s"
+                  "?type=4&responseGroup=small")
+
+
+def bangumi_name_zh(name: str, fetch=None) -> str:
+    """从 Bangumi 取官方中文名，取不到返回空串。
+
+    Bangumi 是中文 ACG/游戏条目库（type=4 是游戏），日系与独立游戏覆盖
+    最好，单机 3A 也有条目但不如 Steam 全。它的 ``name_cn`` 比 Steam 的
+    ``l=schinese`` 更愿意给中文 —— Steam 国区对 RDR2 这类只返回英文名。
+
+    只接受名字校验通过的条目：宁可不补，也不能把《巫师3》的中文名
+    安到《巫师之昆特牌》头上。
+    """
+    fetch = fetch or default_fetch
+    q = (name or "").strip()
+    if not q:
+        return ""
+    try:
+        raw = fetch(BANGUMI_SEARCH % urllib.parse.quote(q))
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    try:
+        d = json.loads(raw.decode("utf-8", "replace"))
+    except Exception:
+        return ""
+    for it in (d.get("list") or [])[:5]:
+        zh = (it.get("name_cn") or "").strip()
+        orig = (it.get("name") or "").strip()
+        if not zh:
+            continue
+        if name_match(q, orig) or name_match(q, zh):
+            return zh
+    return ""
 
 
 def _english_name(appid, fetch) -> str:
@@ -276,15 +327,22 @@ def _match_prefer_first(term: str, items, fetch):
     return None
 
 
-def lookup(name: str, fetch=None) -> dict:
+def lookup(name: str, fetch=None, local_index=None,
+           use_bangumi: bool = False) -> dict:
     """查一款游戏在 Steam 上的身份。
+
+    三层，从快到慢：
+        1. local_index（可选）—— 本地离线索引，命中即返回，零网络
+        2. Steam storesearch + appdetails —— 主源，覆盖面最广
+        3. Bangumi（可选，默认关）—— 只补中文名
 
     返回 dict：
         status        ok / not_found / error
         appid         Steam appid（字符串，查不到为空）
         official_name 商店里的英文名
-        name_zh       官方中文名，没有则为空串
+        name_zh       中文名，没有则为空串
         error         仅 status=error 时有意义
+        source        index / steam / steam+bangumi
 
     注意 status=ok 但 name_zh 为空是**正常结果**：大量独立游戏在 Steam
     国区只有英文名。调用方要把「查到了但没中文名」与「没查到」区分开，
@@ -292,11 +350,21 @@ def lookup(name: str, fetch=None) -> dict:
     """
     fetch = fetch or default_fetch
     res = {"status": STATUS_NOT_FOUND, "appid": "", "name_zh": "",
-           "official_name": "", "error": ""}
+           "official_name": "", "error": "", "source": ""}
     name = (name or "").strip()
     if not name:
         return res
 
+    # 1. 本地索引优先。不产生网络请求，断网时也能认出榜单上的游戏。
+    if local_index is not None:
+        try:
+            hit = local_index(name)
+        except Exception:
+            hit = None
+        if hit:
+            return hit
+
+    # 2. Steam
     any_parsed = False
     last_error = ""
     for term in search_terms(name):
@@ -316,18 +384,35 @@ def lookup(name: str, fetch=None) -> dict:
         first = _match_prefer_first(term, items, fetch)
         if first:
             official = (first.get("name") or "").strip()
-            return _ok(first.get("id"), official,
-                       [first.get("_local"), official])
+            return _with_bangumi(_ok(first.get("id"), official,
+                                     [first.get("_local"), official]),
+                                 name, fetch, use_bangumi)
         hit = _best_match(term, items)
         if hit:
             official = (hit.get("name") or "").strip()
-            return _ok(hit.get("id"), official, [official])
+            return _with_bangumi(_ok(hit.get("id"), official, [official]),
+                                 name, fetch, use_bangumi)
 
     # 所有候选词都解析失败才算网络错误；只要有一轮成功解析，
     # 那就是「确实没搜到」，属于 not_found，不该触发重试退避的 error 分支。
     if not any_parsed and last_error:
         res["status"] = STATUS_ERROR
         res["error"] = last_error
+    return res
+
+
+def _with_bangumi(res: dict, name: str, fetch, enabled: bool) -> dict:
+    """Steam 查到游戏但没给中文名时，可选地从 Bangumi 补一个。
+
+    只在 status=ok 时补：没查到 appid 的话，光有中文名也没法取图标，
+    徒增一次必然超时的请求。
+    """
+    if not enabled or res.get("status") != STATUS_OK or res.get("name_zh"):
+        return res
+    zh = bangumi_name_zh(name, fetch)
+    if zh:
+        res["name_zh"] = zh
+        res["source"] = "steam+bangumi"
     return res
 
 

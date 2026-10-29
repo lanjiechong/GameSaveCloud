@@ -91,7 +91,10 @@ class MainWindow(QMainWindow):
         self.logos = LogoService(cache_dir=os.path.join(self.cfg.base, "logocache"),
                                  icons_dir=self.icons_dir)
         # 中文名 + 图标的批量匹配：刷新后异步跑，绝不阻塞列表
-        self.meta = MetaService(self.vault, self.logos, self)
+        self.meta = MetaService(
+            self.vault, self.logos, self,
+            use_bangumi=bool(self.cfg.data.get("metadata", {})
+                             .get("use_bangumi", False)))
         self.meta.meta_ready.connect(self._on_meta_ready)
         self.meta.progress.connect(self._on_meta_progress)
         self.meta.finished.connect(self._on_meta_done)

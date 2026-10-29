@@ -306,6 +306,19 @@ def main():
           w.vault.get_game(gx.id).display_name == "NoSuchGame XYZ")
     check("退避期内不会重复排队", w.meta.ensure([w.vault.get_game(gx.id)]) == 0)
 
+    print("== 8. 离线资料索引 ==")
+    from gamesave import gameindex
+    st = gameindex.stats()
+    check("索引已加载", st["count"] >= 90, "count=%d path=%s"
+          % (st["count"], os.path.basename(st["path"] or "")))
+    hit = gameindex.lookup("Counter-Strike 2")
+    check("索引能认出榜单游戏", hit is not None and hit["appid"] == "730",
+          repr(hit and hit["appid"]))
+    check("索引命中不产生网络请求", (hit or {}).get("source") == "index",
+          repr((hit or {}).get("source")))
+    check("索引认不出的名字返回 None",
+          gameindex.lookup("这款游戏肯定不在榜单上 XYZ") is None)
+
     # --- 汇总 ---
     print()
     if FAILS:

@@ -3,9 +3,9 @@
 跨平台桌面端的游戏存档备份与同步工具，对标 UU 加速器「云存档」。
 核心承诺：**任何情况下不丢存档** —— 覆盖、回滚、冲突、删除，每一步之前都先留底。
 
-约 5800 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
+约 6200 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
 
-**当前版本 v1.2.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
+**当前版本 v1.3.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -68,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 89 个核心引擎单元测试
+python tests/test_core.py                                # 110 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -103,6 +103,7 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 | 5 | 覆盖/恢复前自动本地留底 | `gamesave/vault.py::_backup_existing` → `localcopies/` |
 | 交互 | 图形界面展示状态/时间/占用 | `ui/main_window.py`（自绘列表 + 状态卡片），图标见 `ui/logos.py`、排版见 `ui/game_list.py` |
 | 交互 | **图标与中文名自动匹配** | `gamesave/gamemeta.py`（Steam 搜索 + 中文名解析 + 退避），`ui/metaservice.py`（后台批量调度），落库见 `vault.py::save_meta`（见 §10.3） |
+| 数据 | **离线资料索引 + 多数据源调研** | `gamesave/gameindex.py` + `ui/assets/gameindex.json`（随包分发），构建工具 `scripts/build_game_index.py`（见 §10.5） |
 | 交互 | 危险操作二次确认 | `ConfirmDialog`（默认焦点在「取消」，回滚还需勾选确认框） |
 | 交互 | 定时自动备份 + 静默同步 | `ui/main_window.py::_build_timer` / `_on_tick`，`config.schedule` |
 | 交互 | 网络异常/冲突清晰提示 | 后台失败只记日志 + 置错误态；冲突中断同步并弹窗交人决策 |
@@ -128,6 +129,7 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 ├───────────────────────────────────────────────────────────────┤
 │  scripts/                 维护工具（非运行时代码）               │
 │  fetch_top_logos.py       本机可选预取离线 logo 包（不分发）     │
+│  build_game_index.py      构建随包分发的游戏资料索引            │
 │  check_licenses.py        发布前依赖许可证自查                  │
 ├───────────────────────────────────────────────────────────────┤
 │  version.py               版本号（发版只改这里，配合 git tag）   │
@@ -146,6 +148,7 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 │                             └ WebDAVBackend（纯标准库）         │
 │  scanner.py                 存档目录发现                        │
 │  gamemeta.py                Steam 名字解析 / 中文名 / 退避策略   │
+│  gameindex.py              离线资料索引（零网络认出榜单游戏）    │
 │  models.py                  dataclass 数据模型                  │
 │  config.py                  跨平台配置（含云端总开关）           │
 └──────────────────────────┬────────────────────────────────────┘
@@ -453,7 +456,7 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 ## 8. 测试
 
 ```bash
-python tests/test_core.py                  # 89 个单元测试
+python tests/test_core.py                  # 110 个单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 ```
 
@@ -732,6 +735,54 @@ N 个条目就是 N 套 layout，窗口缩放时全部重新布局，
 
 ---
 
+### 10.5 数据源与离线索引
+
+**主源只有 Steam，这是实测出来的结论。** 2026-10-30 在本机逐个探测候选源：
+
+| 来源 | 覆盖 | 可靠性 | 本机可达 | 结论 |
+|---|---|---|---|---|
+| Steam Store API | Steam 全量十余万款 | 官方、免密钥、有公开 CDN | ✅ 200 | **主源** |
+| Bangumi | 中文 ACG / 独立游戏强，3A 一般 | 社区维护、免密钥、结构简单 | ❌ 连接超时 | 已接入，默认关 |
+| Wikidata | 全球游戏（含主机独占） | 官方库、免密钥 | ❌ 连接超时 | 不接：要「搜 QID → 取 zh label」两步 |
+| Wikipedia | 热门游戏 | 高 | ❌ 连接超时 | 不接：没有结构化图标 |
+| RAWG | 80 万+ 跨平台 | 中高 | ❌ 连接超时 | 不接：需 API key，免费 2 万次/月 |
+| SteamSpy | Steam 全量（销量估算） | 第三方估算、有延迟 | ⚠️ 403 | 不接：Cloudflare 挑战页 |
+
+代理通道同样不通（所有外站 2 秒内失败）。所以「多接几个源」在当前网络下
+只会给每次刷新多几个超时 —— 真正的可靠性来自**离线索引**，不是更多联网源。
+
+**离线索引**（`ui/assets/gameindex.json`，约 50 KB，随包分发）：
+
+```
+Steam 畅销榜（中英双语各抓 2 页 ≈ 200 个候选）
+  └→ 逐个取 appdetails 详情（名称 / 发行商 / 类型 / 评价数 / 图标地址）
+       └→ 剔除评价数 < 1 的新游（刚上架、评价为 0，不属于「经典」）
+            └→ 按累计评价数降序取前 100，原子写入 JSON
+```
+
+它是**元数据**（没有图片二进制），所以能随仓库和发布包分发 ——
+商标素材仍然只在运行时从 CDN 取，合规边界不变。
+
+匹配顺序因此变成三层：
+
+```
+1. 本地索引   命中即返回，零网络请求（榜单内游戏必定认得出）
+2. Steam      索引没有的，联网搜索 + 英文名复核
+3. Bangumi    仅当 Steam 查到但没给中文名、且配置开着时才用
+```
+
+评价数取 `recommendations.total` —— 最接近「历史销量」的公开数字。
+长期霸榜的老游戏会浮到前面、新游自然沉底，符合「经典畅销」的语义。
+
+重建索引（需能访问 Steam，约 3 分钟）：
+
+```bash
+python scripts/build_game_index.py            # 断点续传，只补缺的
+python scripts/build_game_index.py --refresh  # 全部重抓
+```
+
+---
+
 ## 11. 已知限制
 
 - WebDAV 后端实现了 MKCOL / PUT / GET / PROPFIND / HEAD / Range 续传，
@@ -768,6 +819,6 @@ Python 运行时为 PSF）的完整声明、动态链接合规说明与 Qt 可�
 **关于 AI 辅助开发的说明**：本项目在开发过程中使用了 AI 编程助手
 参与代码编写与问题排查。需求取舍、架构设计、安全模型（留底机制、
 三方合并基准、内容哈希判定等）与最终代码均由人类作者审阅、测试并负责；
-全部核心行为由 `tests/test_core.py` 的 89 个单元测试钉住。如发现任何
+全部核心行为由 `tests/test_core.py` 的 110 个单元测试钉住。如发现任何
 疑似侵权内容，请在 [Issues](https://github.com/lanjiechong/GameSaveCloud/issues)
 反馈，核实后立即处理。

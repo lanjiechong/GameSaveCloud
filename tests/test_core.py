@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gamesave import chunker
 from gamesave import gamemeta
+from gamesave import gameindex
 from gamesave.chunker import CHUNK_SIZE
 from gamesave.models import (Game, Snapshot, FileEntry, ChunkRef,
                              RESOLVE_KEEP_LOCAL, RESOLVE_USE_REMOTE,
@@ -1129,6 +1130,153 @@ class TestMetaScheduling(unittest.TestCase):
         self.assertEqual(gamemeta.retry_delay(3), gamemeta.RETRY_BASE * 4)
         self.assertLessEqual(gamemeta.retry_delay(99), gamemeta.RETRY_MAX)
         self.assertEqual(gamemeta.retry_delay(0), gamemeta.RETRY_BASE)
+
+
+# ==================================================================
+# 17. 离线索引：零网络认出榜单游戏
+# ==================================================================
+class TestGameIndex(unittest.TestCase):
+    def setUp(self):
+        gameindex.set_cache({
+            "1174180": {"name_zh": "荒野大镖客：救赎2",
+                        "name_en": "Red Dead Redemption 2",
+                        "aliases": ["大表哥2", "RDR2"], "reviews": 858498},
+            "2001120": {"name_zh": "双影奇境", "name_en": "Split Fiction",
+                        "aliases": [], "reviews": 5210},
+        })
+
+    def tearDown(self):
+        gameindex.clear_cache()
+
+    def test_exact_english(self):
+        r = gameindex.lookup("Red Dead Redemption 2")
+        self.assertEqual(r["appid"], "1174180")
+        self.assertEqual(r["name_zh"], "荒野大镖客：救赎2")
+        self.assertEqual(r["source"], "index")
+
+    def test_no_space_directory_name(self):
+        """目录名常是无空格连写，归一化后要能对上。"""
+        self.assertEqual(gameindex.lookup("SplitFiction")["appid"], "2001120")
+
+    def test_alias(self):
+        self.assertEqual(gameindex.lookup("RDR2")["appid"], "1174180")
+
+    def test_miss_returns_none(self):
+        self.assertIsNone(gameindex.lookup("这款游戏肯定不在榜上 XYZ"))
+
+    def test_empty_name(self):
+        self.assertIsNone(gameindex.lookup(""))
+        self.assertIsNone(gameindex.lookup("   "))
+
+    def test_entries_sorted_by_reviews(self):
+        rows = gameindex.entries()
+        self.assertEqual(rows[0]["appid"], "1174180")   # 评价数更高
+        self.assertEqual(len(rows), 2)
+
+
+class TestIndexFirstLookup(unittest.TestCase):
+    """索引命中时必须一个网络请求都不发。"""
+
+    def setUp(self):
+        gameindex.set_cache({
+            "1174180": {"name_zh": "荒野大镖客：救赎2",
+                        "name_en": "Red Dead Redemption 2",
+                        "aliases": ["RDR2"], "reviews": 1},
+        })
+
+    def tearDown(self):
+        gameindex.clear_cache()
+
+    def test_index_hit_skips_network(self):
+        calls = []
+
+        def fetch(url):
+            calls.append(url)
+            raise AssertionError("索引命中时不应该联网")
+
+        r = gamemeta.lookup("RDR2", fetch=fetch, local_index=gameindex.lookup)
+        self.assertEqual(r["appid"], "1174180")
+        self.assertEqual(r["source"], "index")
+        self.assertEqual(calls, [])
+
+    def test_index_miss_falls_back_to_steam(self):
+        def fetch(url):
+            return json.dumps({"items": [
+                {"type": "app", "id": 814380, "name": "只狼"}]}).encode()
+
+        r = gamemeta.lookup("只狼", fetch=fetch, local_index=gameindex.lookup)
+        self.assertEqual(r["status"], gamemeta.STATUS_OK)
+        self.assertEqual(r["appid"], "814380")
+
+
+# ==================================================================
+# 18. 补充源 Bangumi：只补中文名，且必须名字对得上
+# ==================================================================
+def _bgm_fetch(list_items):
+    def fetch(url):
+        return json.dumps({"list": list_items}).encode("utf-8")
+    return fetch
+
+
+class TestBangumiSupplement(unittest.TestCase):
+    def test_returns_name_cn(self):
+        fetch = _bgm_fetch([{"name": "Red Dead Redemption 2",
+                             "name_cn": "荒野大镖客：救赎2"}])
+        self.assertEqual(gamemeta.bangumi_name_zh("Red Dead Redemption 2", fetch),
+                         "荒野大镖客：救赎2")
+
+    def test_mismatch_rejected(self):
+        fetch = _bgm_fetch([{"name": "Totally Different", "name_cn": "别的游戏"}])
+        self.assertEqual(gamemeta.bangumi_name_zh("RDR2", fetch), "")
+
+    def test_missing_name_cn_skipped(self):
+        fetch = _bgm_fetch([{"name": "Red Dead Redemption 2", "name_cn": ""}])
+        self.assertEqual(gamemeta.bangumi_name_zh("Red Dead Redemption 2", fetch), "")
+
+    def test_network_failure_returns_empty(self):
+        def fetch(url):
+            raise OSError("timeout")
+        self.assertEqual(gamemeta.bangumi_name_zh("RDR2", fetch), "")
+
+    def test_bad_json_returns_empty(self):
+        self.assertEqual(
+            gamemeta.bangumi_name_zh("RDR2", lambda u: b"<html>502</html>"), "")
+
+    def test_fills_missing_chinese_name(self):
+        def fetch(url):
+            if "bgm.tv" in url:
+                return json.dumps({"list": [
+                    {"name": "Red Dead Redemption 2",
+                     "name_cn": "荒野大镖客：救赎2"}]}).encode()
+            return json.dumps({"items": [
+                {"type": "app", "id": 1174180,
+                 "name": "Red Dead Redemption 2"}]}).encode()
+
+        r = gamemeta.lookup("Red Dead Redemption 2", fetch=fetch, use_bangumi=True)
+        self.assertEqual(r["name_zh"], "荒野大镖客：救赎2")
+        self.assertEqual(r["source"], "steam+bangumi")
+
+    def test_off_by_default(self):
+        """默认不启用：开关关掉时绝不能因为一个补名请求拖慢刷新。"""
+        def fetch(url):
+            if "bgm.tv" in url:
+                raise AssertionError("未启用时不应该请求 Bangumi")
+            return json.dumps({"items": [
+                {"type": "app", "id": 1174180,
+                 "name": "Red Dead Redemption 2"}]}).encode()
+
+        r = gamemeta.lookup("Red Dead Redemption 2", fetch=fetch)
+        self.assertEqual(r["name_zh"], "")
+
+    def test_not_called_when_steam_found_nothing(self):
+        """Steam 没查到就不必再问 Bangumi —— 没有 appid，光有中文名也没用。"""
+        def fetch(url):
+            if "bgm.tv" in url:
+                raise AssertionError("没查到游戏时不应该请求 Bangumi")
+            return json.dumps({"items": []}).encode()
+
+        r = gamemeta.lookup("不存在的游戏 XYZ", fetch=fetch, use_bangumi=True)
+        self.assertEqual(r["status"], gamemeta.STATUS_NOT_FOUND)
 
 
 if __name__ == "__main__":

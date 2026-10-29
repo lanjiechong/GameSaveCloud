@@ -3,6 +3,43 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.0] - 2026-10-30
+
+### 新增
+
+- **离线游戏资料索引**：内置 Steam 畅销榜 Top100 的中英文名 / 发行商 /
+  类型 / 累计评价数 / 图标地址（`ui/assets/gameindex.json`）。
+  匹配时**索引优先**，命中即返回、零网络请求 —— 断网、被限流、商店改版
+  都不影响列表显示；它同时是「Steam 搜不到这款游戏」时的兜底。
+  索引是元数据，不含任何图片二进制，商标素材仍只在运行时从 CDN 取。
+- **中文名补充源 Bangumi**（`gamemeta.bangumi_name_zh`）：Steam 查到游戏
+  但只给英文名时补一个中文名。默认关闭，`metadata.use_bangumi` 开启 ——
+  该接口在当前网络下不可达，常开会给每次刷新白加一个超时。
+- `scripts/build_game_index.py`：索引构建工具。中英双语榜单各抓两页取
+  候选（周榜混着零评价新游，一页过滤完凑不满 100），再逐个取详情、
+  按累计评价数降序取前 100。支持断点续传。
+
+### 变更
+
+- `gamemeta.lookup` 新增 `local_index` / `use_bangumi` 参数，
+  返回体加 `source` 字段（`index` / `steam` / `steam+bangumi`）。
+- `MetaService` 默认接本地索引，索引命中时一个网络请求都不发。
+- `config.metadata` 新增配置段（目前只有 `use_bangumi` 一个开关）。
+
+### 数据源调研结论（2026-10-30 本机实测）
+
+| 来源 | 覆盖 | 可靠性 | 本机可达 | 结论 |
+|---|---|---|---|---|
+| Steam Store API | Steam 全量十余万款 | 官方、免密钥 | ✅ 200 | 主源 |
+| Bangumi | 中文 ACG/独立强，3A 一般 | 社区维护，免密钥 | ❌ 超时 | 接入但默认关 |
+| Wikidata | 全球游戏（含主机独占） | 官方库，免密钥 | ❌ 超时 | 不接：需两步请求取 zh label |
+| Wikipedia | 热门游戏 | 高 | ❌ 超时 | 不接：无结构化图标 |
+| RAWG | 80 万+ 跨平台 | 中高，需 API key | ❌ 超时 | 不接：要 key + 免费额度限制 |
+| SteamSpy | Steam 全量（销量估算） | 第三方估算，有延迟 | ⚠️ 403 | 不接：Cloudflare 挑战页 |
+
+结论：能稳定连上的只有 Steam 官方接口，因此把「离线索引」作为第二层
+可靠性保障，而不是再堆一个同样会超时的联网源。
+
 ## [1.2.0] - 2026-10-30
 
 ### 新增
@@ -128,6 +165,7 @@
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.3.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.0
 [1.2.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.2.0
 [1.1.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.1.0
 [1.0.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.0.0

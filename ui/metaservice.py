@@ -21,7 +21,7 @@ import time
 
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
-from gamesave import gamemeta
+from gamesave import gamemeta, gameindex
 from .workers import Worker
 
 
@@ -32,12 +32,18 @@ class MetaService(QObject):
     progress = Signal(int, int)      # 已完成, 总任务数
     finished = Signal(int, int)      # 成功数, 失败数
 
-    def __init__(self, vault, logos, parent=None, lookup=None):
+    def __init__(self, vault, logos, parent=None, lookup=None,
+                 local_index="auto", use_bangumi=False):
         super().__init__(parent)
         self.vault = vault
         self.logos = logos
         # 查找函数可注入：测试里换成假实现，就不会真去连 Steam。
         self._lookup = lookup or gamemeta.lookup
+        # 本地离线索引：命中即返回、零网络。
+        # "auto" 用自带索引；传 None 显式禁用（测试里避免读到真实索引）。
+        self._local_index = (gameindex.lookup if local_index == "auto"
+                             else local_index)
+        self._use_bangumi = bool(use_bangumi)
         # 独立线程池，3 并发：搜索接口对突发请求比较敏感，
         # 而且图标下载只占带宽不占 CPU，没必要开更多。
         self._pool = QThreadPool()
@@ -99,7 +105,9 @@ class MetaService(QObject):
         def job(_sig):
             # Worker.run() 会把 signals 作为第一个位置参数传进来，
             # 这里用不到但必须收下，否则 TypeError。
-            res = self._lookup(game.name, fetch=self.logos.fetch_bytes)
+            res = self._lookup(game.name, fetch=self.logos.fetch_bytes,
+                               local_index=self._local_index,
+                               use_bangumi=self._use_bangumi)
             img = None
             if res.get("status") == gamemeta.STATUS_OK and res.get("appid"):
                 img = self.logos.fetch_logo_image(res.get("appid"))

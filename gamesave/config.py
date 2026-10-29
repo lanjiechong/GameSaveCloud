@@ -58,6 +58,15 @@ class Config:
                 "keep_snapshots": 30,              # 每款游戏最多保留多少快照
                 "confirm_dangerous": True,         # 危险操作二次确认
             },
+            "metadata": {
+                # 中文名补充源。主源永远是 Steam；Bangumi 只在 Steam 查到
+                # 游戏但没给中文名时补一手，前提是能访问 api.bgm.tv
+                # （本机 2026-10-30 实测不通，所以默认关 —— 打不通的源常开
+                # 只会给每次刷新白加一个超时）。
+                # 本地离线索引（ui/assets/gameindex.json）始终启用：
+                # 它不产生网络请求，没有关掉的必要。
+                "use_bangumi": False,
+            },
             "window": {"width": 1100, "height": 720},
         }
         self.load()

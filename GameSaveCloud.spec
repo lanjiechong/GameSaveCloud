@@ -27,6 +27,9 @@ VERSION_FILE = os.path.join(HERE, "version_info.txt")
 ASSET_FILES = [
     os.path.join(HERE, "ui", "assets", "app_logo.ico"),
     os.path.join(HERE, "ui", "assets", "app_logo.png"),
+    # 游戏资料索引：纯元数据（名称/发行商/评价数/图标 URL），
+    # 不含图片二进制。断网时靠它认出榜单上的游戏，必须随包分发。
+    os.path.join(HERE, "ui", "assets", "gameindex.json"),
 ]
 APP_DATAS = [(p, os.path.join("ui", "assets")) for p in ASSET_FILES
              if os.path.isfile(p)]

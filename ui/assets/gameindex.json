@@ -1,0 +1,2042 @@
+{
+ "generated_at": "2026-10-30",
+ "source": "Steam 畅销榜前 200 个候选（中英双语标题）+ appdetails 详情，剔除评价数 < 1 的新游后按累计评价数降序取前 100",
+ "count": 100,
+ "games": {
+  "730": {
+   "name_en": "Counter-Strike 2",
+   "name_zh": "Counter-Strike 2",
+   "type": "game",
+   "developers": [
+    "Valve"
+   ],
+   "publishers": [
+    "Valve"
+   ],
+   "genres": [
+    "动作",
+    "免费开玩"
+   ],
+   "release": "2017 年 9 月 15 日",
+   "reviews": 5331779,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/730/header_schinese.jpg?t=1793054556",
+   "aliases": []
+  },
+  "578080": {
+   "name_en": "PUBG: BATTLEGROUNDS",
+   "name_zh": "PUBG: BATTLEGROUNDS",
+   "type": "game",
+   "developers": [
+    "PUBG Corporation"
+   ],
+   "publishers": [
+    "KRAFTON, Inc."
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "大型多人在线",
+    "免费开玩"
+   ],
+   "release": "2017 年 12 月 21 日",
+   "reviews": 1768549,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/578080/841ea38bc58cabb70aef65365cf50bc2d79329d9/header.jpg?t=1792718193",
+   "aliases": []
+  },
+  "359550": {
+   "name_en": "Tom Clancy's Rainbow Six Siege",
+   "name_zh": "彩虹六号：围攻",
+   "type": "game",
+   "developers": [
+    "Ubisoft Montreal"
+   ],
+   "publishers": [
+    "Ubisoft"
+   ],
+   "genres": [
+    "动作",
+    "免费开玩"
+   ],
+   "release": "2015 年 12 月 1 日",
+   "reviews": 1257580,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/359550/43699bd711f59de8537d6051ffc88160678001ca/header_alt_assets_27_schinese.jpg?t=1792001976",
+   "aliases": []
+  },
+  "105600": {
+   "name_en": "Terraria",
+   "name_zh": "Terraria",
+   "type": "game",
+   "developers": [
+    "Re-Logic"
+   ],
+   "publishers": [
+    "Re-Logic"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "角色扮演"
+   ],
+   "release": "2011 年 5 月 16 日",
+   "reviews": 1248784,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/105600/header.jpg?t=1792530636",
+   "aliases": []
+  },
+  "252490": {
+   "name_en": "Rust",
+   "name_zh": "Rust",
+   "type": "game",
+   "developers": [
+    "Facepunch Studios"
+   ],
+   "publishers": [
+    "Facepunch Studios"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "大型多人在线",
+    "角色扮演"
+   ],
+   "release": "2018 年 2 月 8 日",
+   "reviews": 1177621,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/252490/header.jpg?t=1781536981",
+   "aliases": []
+  },
+  "431960": {
+   "name_en": "Wallpaper Engine",
+   "name_zh": "Wallpaper Engine：壁纸引擎",
+   "type": "game",
+   "developers": [
+    "Wallpaper Engine Team"
+   ],
+   "publishers": [
+    "Wallpaper Engine Team"
+   ],
+   "genres": [
+    "休闲",
+    "独立",
+    "动画制作和建模",
+    "设计和插画",
+    "照片编辑",
+    "实用工具"
+   ],
+   "release": "2018 年 11 月 16 日",
+   "reviews": 953295,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/431960/header_schinese.jpg?t=1779452230",
+   "aliases": []
+  },
+  "1091500": {
+   "name_en": "Cyberpunk 2077",
+   "name_zh": "赛博朋克 2077",
+   "type": "game",
+   "developers": [
+    "CD PROJEKT RED"
+   ],
+   "publishers": [
+    "CD PROJEKT RED"
+   ],
+   "genres": [
+    "角色扮演"
+   ],
+   "release": "2020 年 12 月 9 日",
+   "reviews": 905814,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1091500/33086f30470a5f4921c913561a0a5c05b583e292/header_alt_assets_9_schinese.jpg?t=1792682505",
+   "aliases": []
+  },
+  "413150": {
+   "name_en": "Stardew Valley",
+   "name_zh": "Stardew Valley",
+   "type": "game",
+   "developers": [
+    "ConcernedApe"
+   ],
+   "publishers": [
+    "ConcernedApe"
+   ],
+   "genres": [
+    "独立",
+    "角色扮演",
+    "模拟"
+   ],
+   "release": "2016 年 2 月 26 日",
+   "reviews": 902466,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/413150/header.jpg?t=1786554168",
+   "aliases": []
+  },
+  "2358720": {
+   "name_en": "Black Myth: Wukong",
+   "name_zh": "黑神话：悟空",
+   "type": "game",
+   "developers": [
+    "Game Science"
+   ],
+   "publishers": [
+    "Game Science"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "角色扮演"
+   ],
+   "release": "2024 年 8 月 19 日",
+   "reviews": 883200,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2358720/header_schinese.jpg?t=1760601605",
+   "aliases": []
+  },
+  "553850": {
+   "name_en": "HELLDIVERS™ 2",
+   "name_zh": "HELLDIVERS™ 绝地潜兵2",
+   "type": "game",
+   "developers": [
+    "Arrowhead Game Studios"
+   ],
+   "publishers": [
+    "PlayStation Publishing LLC"
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2024 年 2 月 8 日",
+   "reviews": 849895,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/553850/3b637a129cd859a9710381a6fd9c78b931df7b51/header_schinese.jpg?t=1792487611",
+   "aliases": []
+  },
+  "1245620": {
+   "name_en": "ELDEN RING",
+   "name_zh": "艾尔登法环",
+   "type": "game",
+   "developers": [
+    "FromSoftware, Inc."
+   ],
+   "publishers": [
+    "FromSoftware, Inc.",
+    "Bandai Namco Entertainment"
+   ],
+   "genres": [
+    "动作",
+    "角色扮演"
+   ],
+   "release": "2022 年 2 月 24 日",
+   "reviews": 835011,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1245620/header.jpg?t=1790290043",
+   "aliases": []
+  },
+  "550": {
+   "name_en": "Left 4 Dead 2",
+   "name_zh": "Left 4 Dead 2",
+   "type": "game",
+   "developers": [
+    "Valve"
+   ],
+   "publishers": [
+    "Valve"
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2009 年 11 月 16 日",
+   "reviews": 824155,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/550/header.jpg?t=1772742214",
+   "aliases": []
+  },
+  "1086940": {
+   "name_en": "Baldur's Gate 3",
+   "name_zh": "博德之门3",
+   "type": "game",
+   "developers": [
+    "Larian Studios"
+   ],
+   "publishers": [
+    "Larian Studios"
+   ],
+   "genres": [
+    "冒险",
+    "角色扮演",
+    "策略"
+   ],
+   "release": "2023 年 8 月 3 日",
+   "reviews": 760155,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1086940/48a2fcbda8565bb45025e98fd8ebde8a7203f6a0/header.jpg?t=1777363040",
+   "aliases": []
+  },
+  "381210": {
+   "name_en": "Dead by Daylight",
+   "name_zh": "黎明杀机",
+   "type": "game",
+   "developers": [
+    "Behaviour Interactive Inc."
+   ],
+   "publishers": [
+    "Behaviour Interactive Inc."
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2016 年 6 月 14 日",
+   "reviews": 691288,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/381210/header.jpg?t=1793202236",
+   "aliases": []
+  },
+  "739630": {
+   "name_en": "Phasmophobia",
+   "name_zh": "Phasmophobia 恐鬼症",
+   "type": "game",
+   "developers": [
+    "Kinetic Games"
+   ],
+   "publishers": [
+    "Kinetic Games"
+   ],
+   "genres": [
+    "动作",
+    "独立",
+    "抢先体验"
+   ],
+   "release": "2020 年 9 月 18 日",
+   "reviews": 686347,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/739630/6283e4bf96c6e8160492ae12016f0c9a308a75d9/header_alt_assets_13.jpg?t=1791632508",
+   "aliases": []
+  },
+  "346110": {
+   "name_en": "ARK: Survival Evolved",
+   "name_zh": "ARK: Survival Evolved",
+   "type": "game",
+   "developers": [
+    "Studio Wildcard",
+    "Instinct Games",
+    "Efecto Studios",
+    "Virtual Basement LLC"
+   ],
+   "publishers": [
+    "Studio Wildcard",
+    "Snail Games USA"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "大型多人在线",
+    "角色扮演"
+   ],
+   "release": "2017 年 8 月 27 日",
+   "reviews": 588845,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/346110/header.jpg?t=1793226330",
+   "aliases": []
+  },
+  "242760": {
+   "name_en": "The Forest",
+   "name_zh": "The Forest",
+   "type": "game",
+   "developers": [
+    "Endnight Games Ltd"
+   ],
+   "publishers": [
+    "Endnight Games Ltd"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "模拟"
+   ],
+   "release": "2018 年 4 月 30 日",
+   "reviews": 584347,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/242760/header.jpg?t=1699381053",
+   "aliases": []
+  },
+  "1938090": {
+   "name_en": "Call of Duty®",
+   "name_zh": "使命召唤®",
+   "type": "game",
+   "developers": [
+    "Treyarch",
+    "Raven Software",
+    "Beenox",
+    "High Moon Studios",
+    "Sledgehammer Games",
+    "Infinity Ward",
+    "Activision Shanghai",
+    "Demonware"
+   ],
+   "publishers": [
+    "Activision"
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2022 年 10 月 27 日",
+   "reviews": 424397,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1938090/1f9949d97579ff1effbb97bedac5f5b1900bf947/header_schinese.jpg?t=1793206213",
+   "aliases": []
+  },
+  "1623730": {
+   "name_en": "Palworld",
+   "name_zh": "Palworld / 幻兽帕鲁",
+   "type": "game",
+   "developers": [
+    "Pocketpair"
+   ],
+   "publishers": [
+    "Pocketpair"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "角色扮演"
+   ],
+   "release": "2026 年 7 月 9 日",
+   "reviews": 417167,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1623730/1b0709ec8de093a97a0bf43e799933eae4faef35/header_schinese.jpg?t=1790336367",
+   "aliases": []
+  },
+  "239140": {
+   "name_en": "Dying Light",
+   "name_zh": "Dying Light",
+   "type": "game",
+   "developers": [
+    "Techland"
+   ],
+   "publishers": [
+    "Techland"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "角色扮演"
+   ],
+   "release": "2015 年 1 月 26 日",
+   "reviews": 380613,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/239140/header_schinese.jpg?t=1782913513",
+   "aliases": []
+  },
+  "322330": {
+   "name_en": "Don't Starve Together",
+   "name_zh": "饥荒联机版",
+   "type": "game",
+   "developers": [
+    "Klei Entertainment"
+   ],
+   "publishers": [
+    "Klei Entertainment"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "角色扮演",
+    "模拟",
+    "策略"
+   ],
+   "release": "2016 年 4 月 21 日",
+   "reviews": 377993,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/322330/2fe09bd869fcbc21227dcda9999a3c5ea4cb38fc/header_alt_assets_51_schinese.jpg?t=1793044716",
+   "aliases": []
+  },
+  "108600": {
+   "name_en": "Project Zomboid",
+   "name_zh": "Project Zomboid",
+   "type": "game",
+   "developers": [
+    "The Indie Stone"
+   ],
+   "publishers": [
+    "The Indie Stone"
+   ],
+   "genres": [
+    "独立",
+    "角色扮演",
+    "模拟",
+    "抢先体验"
+   ],
+   "release": "2013 年 11 月 8 日",
+   "reviews": 371967,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/108600/header.jpg?t=1793224893",
+   "aliases": []
+  },
+  "3241660": {
+   "name_en": "R.E.P.O.",
+   "name_zh": "R.E.P.O.",
+   "type": "game",
+   "developers": [
+    "semiwork"
+   ],
+   "publishers": [
+    "semiwork"
+   ],
+   "genres": [
+    "动作",
+    "抢先体验"
+   ],
+   "release": "2025 年 2 月 26 日",
+   "reviews": 346877,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3241660/62177765c05399116f0453fe1177b00ceed698c4/header_alt_assets_3.jpg?t=1793278962",
+   "aliases": []
+  },
+  "264710": {
+   "name_en": "Subnautica",
+   "name_zh": "Subnautica - 深海迷航",
+   "type": "game",
+   "developers": [
+    "Unknown Worlds Entertainment"
+   ],
+   "publishers": [
+    "Unknown Worlds Entertainment"
+   ],
+   "genres": [
+    "冒险",
+    "独立"
+   ],
+   "release": "2018 年 1 月 23 日",
+   "reviews": 343487,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/264710/header_schinese.jpg?t=1777456112",
+   "aliases": []
+  },
+  "648800": {
+   "name_en": "Raft",
+   "name_zh": "Raft",
+   "type": "game",
+   "developers": [
+    "Redbeet Interactive"
+   ],
+   "publishers": [
+    "Axolot Games"
+   ],
+   "genres": [
+    "冒险",
+    "独立",
+    "模拟"
+   ],
+   "release": "2022 年 6 月 20 日",
+   "reviews": 325037,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/648800/header.jpg?t=1727184011",
+   "aliases": []
+  },
+  "275850": {
+   "name_en": "No Man's Sky",
+   "name_zh": "No Man's Sky 无人深空",
+   "type": "game",
+   "developers": [
+    "Hello Games"
+   ],
+   "publishers": [
+    "Hello Games"
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2016 年 8 月 12 日",
+   "reviews": 319017,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/275850/9f1ca9e3b7d1dccb7b5af404a6739ddc1118ef32/header_alt_assets_26.jpg?t=1793196605",
+   "aliases": []
+  },
+  "3527290": {
+   "name_en": "PEAK",
+   "name_zh": "PEAK",
+   "type": "game",
+   "developers": [
+    "Team PEAK"
+   ],
+   "publishers": [
+    "Aggro Crab",
+    "Evil Landfall?"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立"
+   ],
+   "release": "2025 年 6 月 16 日",
+   "reviews": 310734,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3527290/31bac6b2eccf09b368f5e95ce510bae2baf3cfcd/header.jpg?t=1792684718",
+   "aliases": []
+  },
+  "2807960": {
+   "name_en": "Battlefield™ 6",
+   "name_zh": "战地风云™ 6",
+   "type": "game",
+   "developers": [
+    "Battlefield Studios"
+   ],
+   "publishers": [
+    "Electronic Arts"
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2025 年 10 月 10 日",
+   "reviews": 301790,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2807960/c12d12ce3c7d217398d3fcad77427bfc9d57c570/header.jpg?t=1792168547",
+   "aliases": []
+  },
+  "1326470": {
+   "name_en": "Sons Of The Forest",
+   "name_zh": "Sons Of The Forest",
+   "type": "game",
+   "developers": [
+    "Endnight Games Ltd"
+   ],
+   "publishers": [
+    "Newnight "
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "模拟"
+   ],
+   "release": "2024 年 2 月 22 日",
+   "reviews": 288059,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1326470/header.jpg?t=1708624856",
+   "aliases": []
+  },
+  "251570": {
+   "name_en": "7 Days to Die",
+   "name_zh": "7 Days to Die",
+   "type": "game",
+   "developers": [
+    "The Fun Pimps"
+   ],
+   "publishers": [
+    "The Fun Pimps Entertainment LLC"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "角色扮演",
+    "模拟",
+    "策略"
+   ],
+   "release": "2024 年 7 月 25 日",
+   "reviews": 280667,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/251570/header.jpg?t=1793138252",
+   "aliases": []
+  },
+  "289070": {
+   "name_en": "Sid Meier’s Civilization® VI",
+   "name_zh": "Sid Meier’s Civilization® VI",
+   "type": "game",
+   "developers": [
+    "Firaxis Games",
+    "Aspyr (Mac)",
+    "Aspyr (Linux)"
+   ],
+   "publishers": [
+    "2K",
+    "Aspyr (Mac)",
+    "Aspyr (Linux)"
+   ],
+   "genres": [
+    "策略"
+   ],
+   "release": "2016 年 10 月 20 日",
+   "reviews": 277343,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/289070/header.jpg?t=1792718069",
+   "aliases": []
+  },
+  "1551360": {
+   "name_en": "Forza Horizon 5",
+   "name_zh": "极限竞速：地平线 5",
+   "type": "game",
+   "developers": [
+    "Playground Games"
+   ],
+   "publishers": [
+    "Xbox Game Studios"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "竞速",
+    "模拟",
+    "体育"
+   ],
+   "release": "2021 年 11 月 8 日",
+   "reviews": 262446,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1551360/header.jpg?t=1788546569",
+   "aliases": []
+  },
+  "261550": {
+   "name_en": "Mount & Blade II: Bannerlord",
+   "name_zh": "Mount &amp; Blade II: Bannerlord",
+   "type": "game",
+   "developers": [
+    "TaleWorlds Entertainment"
+   ],
+   "publishers": [
+    "TaleWorlds Entertainment"
+   ],
+   "genres": [
+    "动作",
+    "独立",
+    "角色扮演",
+    "模拟",
+    "策略"
+   ],
+   "release": "2022 年 10 月 25 日",
+   "reviews": 232506,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/261550/header.jpg?t=1764252300",
+   "aliases": []
+  },
+  "3240220": {
+   "name_en": "Grand Theft Auto V Enhanced",
+   "name_zh": "Grand Theft Auto V 增强版",
+   "type": "game",
+   "developers": [
+    "Rockstar North"
+   ],
+   "publishers": [
+    "Rockstar Games"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "竞速"
+   ],
+   "release": "2025 年 3 月 4 日",
+   "reviews": 221198,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3240220/header_schinese.jpg?t=1781187782",
+   "aliases": []
+  },
+  "1426210": {
+   "name_en": "It Takes Two",
+   "name_zh": "双人成行",
+   "type": "game",
+   "developers": [
+    "Hazelight Studios"
+   ],
+   "publishers": [
+    "Electronic Arts"
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2021 年 3 月 25 日",
+   "reviews": 220716,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1426210/header_schinese.jpg?t=1777395376",
+   "aliases": []
+  },
+  "2868840": {
+   "name_en": "Slay the Spire 2",
+   "name_zh": "Slay the Spire 2",
+   "type": "game",
+   "developers": [
+    "Mega Crit"
+   ],
+   "publishers": [
+    "Mega Crit"
+   ],
+   "genres": [
+    "独立",
+    "策略",
+    "抢先体验"
+   ],
+   "release": "2026 年 3 月 5 日",
+   "reviews": 214500,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2868840/b0958d387dc366211e0f353443710cfcf9fdb020/header.jpg?t=1787169309",
+   "aliases": []
+  },
+  "594650": {
+   "name_en": "Hunt: Showdown 1896",
+   "name_zh": "猎杀：对决 1896",
+   "type": "game",
+   "developers": [
+    "Crytek"
+   ],
+   "publishers": [
+    "Crytek"
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2019 年 8 月 27 日",
+   "reviews": 214384,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/594650/8cf55bcd74fc14c93f3a9cc7d0a442afabab6f88/header_alt_assets_29.jpg?t=1791385253",
+   "aliases": []
+  },
+  "294100": {
+   "name_en": "RimWorld",
+   "name_zh": "边缘世界 RimWorld",
+   "type": "game",
+   "developers": [
+    "Ludeon Studios"
+   ],
+   "publishers": [
+    "Ludeon Studios"
+   ],
+   "genres": [
+    "独立",
+    "模拟",
+    "策略"
+   ],
+   "release": "2018 年 10 月 17 日",
+   "reviews": 210961,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/294100/0bd1adfad18e931b14529ce177fbdea0f5072760/header_schinese.jpg?t=1782756789",
+   "aliases": []
+  },
+  "2246340": {
+   "name_en": "Monster Hunter Wilds",
+   "name_zh": "Monster Hunter Wilds",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "角色扮演"
+   ],
+   "release": "2025 年 2 月 27 日",
+   "reviews": 203722,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2246340/header.jpg?t=1787549555",
+   "aliases": []
+  },
+  "1203220": {
+   "name_en": "NARAKA: BLADEPOINT",
+   "name_zh": "永劫无间",
+   "type": "game",
+   "developers": [
+    "24 Entertainment"
+   ],
+   "publishers": [
+    "NetEase Games "
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "大型多人在线",
+    "免费开玩"
+   ],
+   "release": "2021 年 8 月 11 日",
+   "reviews": 198022,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1203220/b13b538aad63711855dbeb2c5e5b64c3465f46bd/header_schinese.jpg?t=1792651021",
+   "aliases": []
+  },
+  "646570": {
+   "name_en": "Slay the Spire",
+   "name_zh": "Slay the Spire",
+   "type": "game",
+   "developers": [
+    "Mega Crit"
+   ],
+   "publishers": [
+    "Mega Crit"
+   ],
+   "genres": [
+    "独立",
+    "策略"
+   ],
+   "release": "2019 年 1 月 23 日",
+   "reviews": 194644,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/646570/header.jpg?t=1774015376",
+   "aliases": []
+  },
+  "2050650": {
+   "name_en": "Resident Evil 4",
+   "name_zh": "Resident Evil 4",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2023 年 3 月 23 日",
+   "reviews": 193148,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2050650/header.jpg?t=1772502922",
+   "aliases": []
+  },
+  "203160": {
+   "name_en": "Tomb Raider Game of the Year",
+   "name_zh": "Tomb Raider Game of the Year",
+   "type": "game",
+   "developers": [
+    "Crystal Dynamics",
+    "Eidos-Montréal",
+    "Feral Interactive (Mac)",
+    "Nixxes"
+   ],
+   "publishers": [
+    "Crystal Dynamics",
+    "Feral Interactive (Mac)"
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2013 年 3 月 4 日",
+   "reviews": 174464,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/203160/13a6dfaa4655377988aa627f03b2322f8bf18ec9/header_alt_assets_0.jpg?t=1792674634",
+   "aliases": []
+  },
+  "518790": {
+   "name_en": "theHunter: Call of the Wild™",
+   "name_zh": "《猎人：荒野的召唤™》",
+   "type": "game",
+   "developers": [
+    "Expansive Worlds"
+   ],
+   "publishers": [
+    "Avalanche Studios"
+   ],
+   "genres": [
+    "冒险",
+    "模拟",
+    "体育"
+   ],
+   "release": "2017 年 2 月 16 日",
+   "reviews": 171908,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/518790/de78942e84203b532c5bd853d2ee8f6dd493ac01/header_schinese.jpg?t=1791555374",
+   "aliases": []
+  },
+  "534380": {
+   "name_en": "Dying Light 2 Stay Human: Reloaded Edition",
+   "name_zh": "消逝的光芒2: 重装上阵版",
+   "type": "game",
+   "developers": [
+    "Techland"
+   ],
+   "publishers": [
+    "Techland"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "角色扮演"
+   ],
+   "release": "2022 年 2 月 3 日",
+   "reviews": 166200,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/534380/header_schinese.jpg?t=1788258144",
+   "aliases": []
+  },
+  "2379780": {
+   "name_en": "Balatro",
+   "name_zh": "Balatro",
+   "type": "game",
+   "developers": [
+    "LocalThunk"
+   ],
+   "publishers": [
+    "Playstack"
+   ],
+   "genres": [
+    "休闲",
+    "独立",
+    "策略"
+   ],
+   "release": "2024 年 2 月 20 日",
+   "reviews": 162448,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2379780/7a85430784e4d613cdb0547414d8cf16ffa45747/header.jpg?t=1790693638",
+   "aliases": []
+  },
+  "883710": {
+   "name_en": "Resident Evil 2",
+   "name_zh": "Resident Evil 2",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2019 年 1 月 24 日",
+   "reviews": 159808,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/883710/header_schinese.jpg?t=1779433152",
+   "aliases": []
+  },
+  "588650": {
+   "name_en": "Dead Cells",
+   "name_zh": "Dead Cells",
+   "type": "game",
+   "developers": [
+    "Motion Twin"
+   ],
+   "publishers": [
+    "Motion Twin"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立"
+   ],
+   "release": "2018 年 8 月 6 日",
+   "reviews": 157270,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/588650/header.jpg?t=1779086887",
+   "aliases": []
+  },
+  "1868140": {
+   "name_en": "DAVE THE DIVER",
+   "name_zh": "潜水员戴夫 DAVE THE DIVER",
+   "type": "game",
+   "developers": [
+    "MINTROCKET"
+   ],
+   "publishers": [
+    "MINTROCKET"
+   ],
+   "genres": [
+    "冒险",
+    "休闲",
+    "角色扮演",
+    "模拟"
+   ],
+   "release": "2023 年 6 月 28 日",
+   "reviews": 144376,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1868140/81bdb3bce15d27ca1b4554a642d91096e89be229/header.jpg?t=1791478061",
+   "aliases": []
+  },
+  "1943950": {
+   "name_en": "Escape the Backrooms",
+   "name_zh": "Escape the Backrooms",
+   "type": "game",
+   "developers": [
+    "Fancy Games",
+    "Blackbird Interactive"
+   ],
+   "publishers": [
+    "Secret Mode"
+   ],
+   "genres": [
+    "动作",
+    "独立"
+   ],
+   "release": "2025 年 10 月 23 日",
+   "reviews": 140157,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1943950/8feac86b42210aea2b466a130238dde80992b4f9/header_alt_assets_4.jpg?t=1793277465",
+   "aliases": []
+  },
+  "1092790": {
+   "name_en": "Inscryption",
+   "name_zh": "邪恶冥刻",
+   "type": "game",
+   "developers": [
+    "Daniel Mullins Games"
+   ],
+   "publishers": [
+    "Devolver Digital"
+   ],
+   "genres": [
+    "冒险",
+    "独立",
+    "策略"
+   ],
+   "release": "2021 年 10 月 19 日",
+   "reviews": 135936,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1092790/header.jpg?t=1777572925",
+   "aliases": []
+  },
+  "391220": {
+   "name_en": "Rise of the Tomb Raider™",
+   "name_zh": "Rise of the Tomb Raider™",
+   "type": "game",
+   "developers": [
+    "Crystal Dynamics",
+    "Eidos-Montréal",
+    "Feral Interactive (Mac)",
+    "Feral Interactive (Linux)",
+    "Nixxes"
+   ],
+   "publishers": [
+    "Crystal Dynamics",
+    "Feral Interactive (Mac)",
+    "Feral Interactive (Linux)"
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2016 年 2 月 9 日",
+   "reviews": 128370,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/391220/29279804029df9b7540caef5c086c9f0393e2e2d/header_alt_assets_0.jpg?t=1792675385",
+   "aliases": []
+  },
+  "1867240": {
+   "name_en": "WARDOGS",
+   "name_zh": "WARDOGS",
+   "type": "game",
+   "developers": [
+    "BULKHEAD"
+   ],
+   "publishers": [
+    "Team17"
+   ],
+   "genres": [
+    "动作",
+    "独立",
+    "大型多人在线",
+    "模拟",
+    "抢先体验"
+   ],
+   "release": "2026 年 9 月 10 日",
+   "reviews": 127780,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1867240/c24972c6aeeb826a72a86fd8616c3a33d49e4b4f/header_alt_assets_0_schinese.jpg?t=1791928607",
+   "aliases": []
+  },
+  "1962700": {
+   "name_en": "Subnautica 2",
+   "name_zh": "Subnautica 2：异星水域",
+   "type": "game",
+   "developers": [
+    "Unknown Worlds Entertainment"
+   ],
+   "publishers": [
+    "Unknown Worlds Entertainment"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "抢先体验"
+   ],
+   "release": "2026 年 5 月 14 日",
+   "reviews": 118635,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1962700/998f14fffb6e9917639ce4ba992c7e9f4a0157b5/header_schinese.jpg?t=1785967256",
+   "aliases": []
+  },
+  "3321460": {
+   "name_en": "Crimson Desert Enhanced",
+   "name_zh": "红色沙漠：增强版",
+   "type": "game",
+   "developers": [
+    "Pearl Abyss"
+   ],
+   "publishers": [
+    "Pearl Abyss"
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2026 年 3 月 19 日",
+   "reviews": 117755,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3321460/72caf7e120e63fcf25b92e3b4b6477b76baffa45/header_schinese.jpg?t=1792637341",
+   "aliases": []
+  },
+  "305620": {
+   "name_en": "The Long Dark",
+   "name_zh": "The Long Dark",
+   "type": "game",
+   "developers": [
+    "Hinterland Studio Inc."
+   ],
+   "publishers": [
+    "Hinterland Studio Inc."
+   ],
+   "genres": [
+    "冒险",
+    "独立",
+    "模拟",
+    "策略"
+   ],
+   "release": "2017 年 8 月 1 日",
+   "reviews": 112520,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/305620/6c82ea1073946b0e83974a0ae6bd9d29d93911f9/header.jpg?t=1792088805",
+   "aliases": []
+  },
+  "2835570": {
+   "name_en": "Buckshot Roulette",
+   "name_zh": "恶魔轮盘",
+   "type": "game",
+   "developers": [
+    "Mike Klubnika"
+   ],
+   "publishers": [
+    "CRITICAL REFLEX"
+   ],
+   "genres": [
+    "动作",
+    "独立",
+    "模拟"
+   ],
+   "release": "2024 年 4 月 4 日",
+   "reviews": 111942,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2835570/header_schinese.jpg?t=1783085442",
+   "aliases": []
+  },
+  "1361210": {
+   "name_en": "Warhammer 40,000: Darktide",
+   "name_zh": "战锤40K：暗潮",
+   "type": "game",
+   "developers": [
+    "Fatshark"
+   ],
+   "publishers": [
+    "Fatshark"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "角色扮演"
+   ],
+   "release": "2022 年 11 月 30 日",
+   "reviews": 109758,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1361210/6f8919b0183f24d271650c6dca958fb91edd5849/header_alt_assets_20.jpg?t=1790691939",
+   "aliases": []
+  },
+  "3764200": {
+   "name_en": "Resident Evil Requiem",
+   "name_zh": "Resident Evil Requiem",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2026 年 2 月 26 日",
+   "reviews": 109723,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3764200/ce5437442768e38eb575f205ab9397d0264017b0/header.jpg?t=1779840172",
+   "aliases": []
+  },
+  "2399830": {
+   "name_en": "ARK: Survival Ascended",
+   "name_zh": "方舟: 生存飞升",
+   "type": "game",
+   "developers": [
+    "Studio Wildcard",
+    "Grove Street Games",
+    "Instinct Games"
+   ],
+   "publishers": [
+    "Studio Wildcard",
+    "Snail Games USA"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "大型多人在线",
+    "角色扮演",
+    "抢先体验"
+   ],
+   "release": "2023 年 10 月 25 日",
+   "reviews": 109065,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2399830/d934813ca531af0fce69fe36bc972f1c90d1aa19/header.jpg?t=1793226168",
+   "aliases": []
+  },
+  "1196590": {
+   "name_en": "Resident Evil Village",
+   "name_zh": "Resident Evil Village",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2021 年 5 月 6 日",
+   "reviews": 108140,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1196590/header.jpg?t=1776927117",
+   "aliases": []
+  },
+  "1142710": {
+   "name_en": "Total War: WARHAMMER III",
+   "name_zh": "全面战争：战锤3",
+   "type": "game",
+   "developers": [
+    "CREATIVE ASSEMBLY",
+    "Feral Interactive"
+   ],
+   "publishers": [
+    "SEGA",
+    "Feral Interactive"
+   ],
+   "genres": [
+    "动作",
+    "策略"
+   ],
+   "release": "2022 年 2 月 16 日",
+   "reviews": 107081,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1142710/header.jpg?t=1790321531",
+   "aliases": []
+  },
+  "238320": {
+   "name_en": "Outlast",
+   "name_zh": "Outlast",
+   "type": "game",
+   "developers": [
+    "Red Barrels"
+   ],
+   "publishers": [
+    "Red Barrels"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立"
+   ],
+   "release": "2013 年 9 月 4 日",
+   "reviews": 105654,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/238320/header.jpg?t=1666817106",
+   "aliases": []
+  },
+  "1158310": {
+   "name_en": "Crusader Kings III",
+   "name_zh": "Crusader Kings III",
+   "type": "game",
+   "developers": [
+    "Paradox Development Studio"
+   ],
+   "publishers": [
+    "Paradox Interactive"
+   ],
+   "genres": [
+    "角色扮演",
+    "模拟",
+    "策略"
+   ],
+   "release": "2020 年 9 月 1 日",
+   "reviews": 103942,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1158310/8a7e814d13f8e73c0d40471f585ece908f9be282/header.jpg?t=1792414688",
+   "aliases": []
+  },
+  "1304930": {
+   "name_en": "The Outlast Trials",
+   "name_zh": "The Outlast Trials",
+   "type": "game",
+   "developers": [
+    "Red Barrels"
+   ],
+   "publishers": [
+    "Red Barrels"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立"
+   ],
+   "release": "2024 年 3 月 5 日",
+   "reviews": 100478,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1304930/e3b17cf268afa51334b63124a2fe0aef3f1d136b/header_alt_assets_4.jpg?t=1792554994",
+   "aliases": []
+  },
+  "1203620": {
+   "name_en": "Enshrouded",
+   "name_zh": "雾锁王国 (Enshrouded)",
+   "type": "game",
+   "developers": [
+    "Keen Games GmbH"
+   ],
+   "publishers": [
+    "Keen Games GmbH"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "角色扮演"
+   ],
+   "release": "2026 年 10 月 15 日",
+   "reviews": 98403,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1203620/98ca939f51b39bdd41e0e9198a9ccf8421148770/header_alt_assets_2.jpg?t=1792078032",
+   "aliases": []
+  },
+  "219740": {
+   "name_en": "Don't Starve",
+   "name_zh": "饥荒",
+   "type": "game",
+   "developers": [
+    "Klei Entertainment"
+   ],
+   "publishers": [
+    "Klei Entertainment"
+   ],
+   "genres": [
+    "冒险",
+    "独立",
+    "模拟"
+   ],
+   "release": "2013 年 4 月 23 日",
+   "reviews": 97261,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/219740/7cf7e37c34760769f1021489a26dc3c59cee5c8f/header_schinese.jpg?t=1790876891",
+   "aliases": []
+  },
+  "613100": {
+   "name_en": "House Flipper",
+   "name_zh": "房产达人",
+   "type": "game",
+   "developers": [
+    "Empyrean"
+   ],
+   "publishers": [
+    "Frozen District",
+    "PlayWay S.A."
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "休闲",
+    "独立",
+    "大型多人在线",
+    "模拟",
+    "策略"
+   ],
+   "release": "2018 年 5 月 17 日",
+   "reviews": 92747,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/613100/header_schinese.jpg?t=1790844381",
+   "aliases": []
+  },
+  "952060": {
+   "name_en": "Resident Evil 3",
+   "name_zh": "Resident Evil 3",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作"
+   ],
+   "release": "2020 年 4 月 2 日",
+   "reviews": 91841,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/952060/header.jpg?t=1790215956",
+   "aliases": []
+  },
+  "2483190": {
+   "name_en": "Forza Horizon 6",
+   "name_zh": "极限竞速：地平线 6",
+   "type": "game",
+   "developers": [
+    "Playground Games"
+   ],
+   "publishers": [
+    "Xbox Game Studios"
+   ],
+   "genres": [
+    "竞速",
+    "模拟",
+    "体育"
+   ],
+   "release": "2026 年 5 月 18 日",
+   "reviews": 91326,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2483190/bd1e762f4720cb68af365f2e41d002f14dd74fbf/header_alt_assets_5.jpg?t=1791312088",
+   "aliases": []
+  },
+  "418370": {
+   "name_en": "Resident Evil 7 Biohazard",
+   "name_zh": "Resident Evil 7 Biohazard",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2017 年 1 月 23 日",
+   "reviews": 89477,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/418370/header.jpg?t=1778464947",
+   "aliases": []
+  },
+  "4704690": {
+   "name_en": "MECCHA CHAMELEON",
+   "name_zh": "MECCHA CHAMELEON",
+   "type": "game",
+   "developers": [
+    "lemorion_1224"
+   ],
+   "publishers": [
+    "lemorion_1224"
+   ],
+   "genres": [
+    "休闲"
+   ],
+   "release": "2026 年 6 月 9 日",
+   "reviews": 81215,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/4704690/163e2a742e5fb8e1f5d1e3a890da98f04ab809d4/header.jpg?t=1789464996",
+   "aliases": []
+  },
+  "815370": {
+   "name_en": "Green Hell",
+   "name_zh": "绿色地狱",
+   "type": "game",
+   "developers": [
+    "Creepy Jar"
+   ],
+   "publishers": [
+    "Creepy Jar"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立",
+    "模拟"
+   ],
+   "release": "2019 年 9 月 5 日",
+   "reviews": 80835,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/815370/header_schinese.jpg?t=1783077147",
+   "aliases": []
+  },
+  "2001120": {
+   "name_en": "Split Fiction",
+   "name_zh": "双影奇境",
+   "type": "game",
+   "developers": [
+    "Hazelight Studios"
+   ],
+   "publishers": [
+    "Electronic Arts"
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2025 年 3 月 6 日",
+   "reviews": 79510,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2001120/header.jpg?t=1763484567",
+   "aliases": []
+  },
+  "2054970": {
+   "name_en": "Dragon's Dogma 2",
+   "name_zh": "Dragon's Dogma 2",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作",
+    "角色扮演"
+   ],
+   "release": "2024 年 3 月 21 日",
+   "reviews": 78709,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2054970/header.jpg?t=1791504871",
+   "aliases": []
+  },
+  "4001890": {
+   "name_en": "How to Fish",
+   "name_zh": "渔力全开",
+   "type": "game",
+   "developers": [
+    "Dazed Games"
+   ],
+   "publishers": [
+    "Dazed Games"
+   ],
+   "genres": [
+    "动作",
+    "休闲",
+    "独立",
+    "模拟"
+   ],
+   "release": "2026 年 8 月 20 日",
+   "reviews": 76208,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/4001890/45c4ddff4901e32c4b8b643e1b97d0d01898d299/header.jpg?t=1792508550",
+   "aliases": []
+  },
+  "750920": {
+   "name_en": "Shadow of the Tomb Raider: Definitive Edition",
+   "name_zh": "Shadow of the Tomb Raider: Definitive Edition",
+   "type": "game",
+   "developers": [
+    "Eidos-Montréal",
+    "Crystal Dynamics",
+    "Nixxes",
+    "Feral Interactive (Mac)",
+    "Feral interactive (Linux)"
+   ],
+   "publishers": [
+    "Crystal Dynamics",
+    "Feral Interactive (Mac)",
+    "Feral interactive (Linux)"
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2018 年 9 月 14 日",
+   "reviews": 73278,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/750920/86f9744a410121ff869cc19f63aa9e3dfcf54b8d/header_alt_assets_0.jpg?t=1792675045",
+   "aliases": []
+  },
+  "1466860": {
+   "name_en": "Age of Empires IV: Anniversary Edition",
+   "name_zh": "Age of Empires IV: Anniversary Edition",
+   "type": "game",
+   "developers": [
+    "World's Edge",
+    "Relic Entertainment",
+    "Forgotten Empires",
+    "Climax Studios"
+   ],
+   "publishers": [
+    "Xbox Game Studios"
+   ],
+   "genres": [
+    "策略"
+   ],
+   "release": "2021 年 10 月 28 日",
+   "reviews": 72820,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1466860/header.jpg?t=1793293673",
+   "aliases": []
+  },
+  "2479810": {
+   "name_en": "Gray Zone Warfare",
+   "name_zh": "灰区战争",
+   "type": "game",
+   "developers": [
+    "MADFINGER Games, a.s."
+   ],
+   "publishers": [
+    "MADFINGER Games, a.s."
+   ],
+   "genres": [
+    "动作",
+    "大型多人在线",
+    "模拟",
+    "抢先体验"
+   ],
+   "release": "2024 年 4 月 30 日",
+   "reviews": 70504,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2479810/c1a890c67d49407dc456819450c95e45c0345c5a/header_alt_assets_6_schinese.jpg?t=1793112502",
+   "aliases": []
+  },
+  "1274570": {
+   "name_en": "DEVOUR",
+   "name_zh": "DEVOUR",
+   "type": "game",
+   "developers": [
+    "Straight Back Games"
+   ],
+   "publishers": [
+    "Straight Back Games"
+   ],
+   "genres": [
+    "独立"
+   ],
+   "release": "2021 年 1 月 28 日",
+   "reviews": 68962,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1274570/bb90f9fa36e4c35a5f28cdc38cf75b3eb5c39032/header.jpg?t=1765533474",
+   "aliases": []
+  },
+  "949230": {
+   "name_en": "Cities: Skylines II",
+   "name_zh": "Cities: Skylines II 都市：天际线2",
+   "type": "game",
+   "developers": [
+    "Iceflake Studios",
+    "Colossal Order"
+   ],
+   "publishers": [
+    "Paradox Interactive"
+   ],
+   "genres": [
+    "模拟"
+   ],
+   "release": "2023 年 10 月 24 日",
+   "reviews": 66259,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/949230/667de69bfeaf7aceafe83097fabad6a40d397f74/header_alt_assets_8_schinese.jpg?t=1793116151",
+   "aliases": []
+  },
+  "728880": {
+   "name_en": "Overcooked! 2",
+   "name_zh": "Overcooked! 2",
+   "type": "game",
+   "developers": [
+    "Ghost Town Games Ltd.",
+    "Team17"
+   ],
+   "publishers": [
+    "Team17"
+   ],
+   "genres": [
+    "动作",
+    "休闲",
+    "独立"
+   ],
+   "release": "2018 年 8 月 7 日",
+   "reviews": 62634,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/728880/3ebab1a37d85815dd61b2193adf6232e13446217/header_schinese.jpg?t=1789548883",
+   "aliases": []
+  },
+  "3008130": {
+   "name_en": "Dying Light: The Beast",
+   "name_zh": "《消逝的光芒：困兽》",
+   "type": "game",
+   "developers": [
+    "Techland"
+   ],
+   "publishers": [
+    "Techland"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "角色扮演"
+   ],
+   "release": "2025 年 9 月 18 日",
+   "reviews": 61295,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3008130/af3caddea4ca2bee4491e43613735aa9ee79666b/header_schinese.jpg?t=1789646537",
+   "aliases": []
+  },
+  "1659040": {
+   "name_en": "HITMAN World of Assassination",
+   "name_zh": "HITMAN World of Assassination",
+   "type": "game",
+   "developers": [
+    "IO Interactive A/S"
+   ],
+   "publishers": [
+    "IO Interactive A/S"
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2022 年 1 月 20 日",
+   "reviews": 60055,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1659040/c62446d5c95f583a296d7f1b99045a61e2f81dea/header.jpg?t=1793287448",
+   "aliases": []
+  },
+  "3932890": {
+   "name_en": "Escape from Tarkov",
+   "name_zh": "Escape from Tarkov",
+   "type": "game",
+   "developers": [
+    "Battlestate Games"
+   ],
+   "publishers": [
+    "Battlestate Games"
+   ],
+   "genres": [
+    "动作",
+    "大型多人在线",
+    "角色扮演",
+    "模拟"
+   ],
+   "release": "2025 年 11 月 15 日",
+   "reviews": 58759,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3932890/4dd12ea3b00a4f8b67bfd629f3b9abbf8d5cab05/header_alt_assets_2.jpg?t=1785782094",
+   "aliases": []
+  },
+  "1260320": {
+   "name_en": "Party Animals",
+   "name_zh": "猛兽派对",
+   "type": "game",
+   "developers": [
+    "Recreate Games"
+   ],
+   "publishers": [
+    "Source Technology"
+   ],
+   "genres": [
+    "动作",
+    "休闲",
+    "独立"
+   ],
+   "release": "2023 年 9 月 20 日",
+   "reviews": 58423,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1260320/14b53fc1e5d888e5690221350d83eb133b7af683/header_alt_assets_10.jpg?t=1789480764",
+   "aliases": []
+  },
+  "2567870": {
+   "name_en": "Chained Together",
+   "name_zh": "Chained Together",
+   "type": "game",
+   "developers": [
+    "Anegar Games",
+    "Lab42"
+   ],
+   "publishers": [
+    "Secret Mode"
+   ],
+   "genres": [
+    "冒险",
+    "休闲",
+    "独立",
+    "模拟"
+   ],
+   "release": "2024 年 6 月 19 日",
+   "reviews": 55394,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2567870/ff16ff5057fa8e0a3a2cb9f4665a59a255c831cb/header_alt_assets_1.jpg?t=1793107565",
+   "aliases": []
+  },
+  "1451940": {
+   "name_en": "NEEDY STREAMER OVERLOAD",
+   "name_zh": "主播女孩重度依赖",
+   "type": "game",
+   "developers": [
+    "WSS playground",
+    "xemono"
+   ],
+   "publishers": [
+    "WSS playground",
+    "Alliance Arts"
+   ],
+   "genres": [
+    "冒险",
+    "独立"
+   ],
+   "release": "2022 年 1 月 21 日",
+   "reviews": 54917,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1451940/header_schinese.jpg?t=1762834234",
+   "aliases": []
+  },
+  "414700": {
+   "name_en": "Outlast 2",
+   "name_zh": "Outlast 2",
+   "type": "game",
+   "developers": [
+    "Red Barrels"
+   ],
+   "publishers": [
+    "Red Barrels"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "独立"
+   ],
+   "release": "2017 年 4 月 24 日",
+   "reviews": 54769,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/414700/header.jpg?t=1618944453",
+   "aliases": []
+  },
+  "568220": {
+   "name_en": "Lobotomy Corporation | Monster Management Simulation",
+   "name_zh": "Lobotomy Corporation | Monster Management Simulation",
+   "type": "game",
+   "developers": [
+    "ProjectMoon"
+   ],
+   "publishers": [
+    "ProjectMoon"
+   ],
+   "genres": [
+    "独立",
+    "模拟"
+   ],
+   "release": "2018 年 4 月 9 日",
+   "reviews": 53593,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/568220/header.jpg?t=1636694188",
+   "aliases": []
+  },
+  "1364780": {
+   "name_en": "Street Fighter 6",
+   "name_zh": "Street Fighter 6",
+   "type": "game",
+   "developers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "publishers": [
+    "CAPCOM Co., Ltd."
+   ],
+   "genres": [
+    "动作",
+    "冒险"
+   ],
+   "release": "2023 年 6 月 1 日",
+   "reviews": 51355,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1364780/header.jpg?t=1791866175",
+   "aliases": [
+    "Street Fighter™ 6"
+   ]
+  },
+  "3097560": {
+   "name_en": "Liar's Bar",
+   "name_zh": "Liar's Bar",
+   "type": "game",
+   "developers": [
+    "Curve Animation"
+   ],
+   "publishers": [
+    "Curve Animation"
+   ],
+   "genres": [
+    "休闲",
+    "独立",
+    "模拟",
+    "策略",
+    "抢先体验"
+   ],
+   "release": "2024 年 10 月 2 日",
+   "reviews": 48898,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3097560/054cf90dfb2e0de8bf595fcd2cfd1b6853bf2556/header.jpg?t=1783933354",
+   "aliases": []
+  },
+  "440": {
+   "name_en": "Team Fortress 2",
+   "name_zh": "Team Fortress 2",
+   "type": "game",
+   "developers": [
+    "Valve"
+   ],
+   "publishers": [
+    "Valve"
+   ],
+   "genres": [
+    "动作",
+    "免费开玩"
+   ],
+   "release": "2007 年 10 月 10 日",
+   "reviews": 48148,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/440/header.jpg?t=1757348372",
+   "aliases": []
+  },
+  "880940": {
+   "name_en": "Pummel Party",
+   "name_zh": "Pummel Party",
+   "type": "game",
+   "developers": [
+    "Rebuilt Games"
+   ],
+   "publishers": [
+    "Rebuilt Games"
+   ],
+   "genres": [
+    "动作",
+    "休闲",
+    "独立"
+   ],
+   "release": "2018 年 9 月 20 日",
+   "reviews": 46353,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/880940/header.jpg?t=1725311353",
+   "aliases": []
+  },
+  "529340": {
+   "name_en": "Victoria 3",
+   "name_zh": "Victoria 3",
+   "type": "game",
+   "developers": [
+    "Paradox Development Studio"
+   ],
+   "publishers": [
+    "Paradox Interactive"
+   ],
+   "genres": [
+    "模拟",
+    "策略"
+   ],
+   "release": "2022 年 10 月 25 日",
+   "reviews": 45797,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/529340/header.jpg?t=1791467998",
+   "aliases": []
+  },
+  "2277560": {
+   "name_en": "WUCHANG: Fallen Feathers",
+   "name_zh": "明末：渊虚之羽",
+   "type": "game",
+   "developers": [
+    "Leenzee"
+   ],
+   "publishers": [
+    "505 Games"
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "角色扮演"
+   ],
+   "release": "2025 年 7 月 23 日",
+   "reviews": 45290,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2277560/64660e8560e2b86e9c8977c318a23abe44badbd4/header_schinese.jpg?t=1793288514",
+   "aliases": []
+  },
+  "881020": {
+   "name_en": "Granblue Fantasy: Relink",
+   "name_zh": "Granblue Fantasy: Relink",
+   "type": "game",
+   "developers": [
+    "Cygames, Inc."
+   ],
+   "publishers": [
+    "Cygames, Inc."
+   ],
+   "genres": [
+    "动作",
+    "冒险",
+    "角色扮演"
+   ],
+   "release": "2024 年 1 月 31 日",
+   "reviews": 41419,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/881020/header.jpg?t=1792403376",
+   "aliases": []
+  },
+  "1478500": {
+   "name_en": "Big Walk",
+   "name_zh": "Big Walk",
+   "type": "game",
+   "developers": [
+    "House House"
+   ],
+   "publishers": [
+    "Panic"
+   ],
+   "genres": [
+    "冒险"
+   ],
+   "release": "2026 年 8 月 4 日",
+   "reviews": 40175,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1478500/62eeee1507dbac905e128a62f2ce690550238db0/header.jpg?t=1785911674",
+   "aliases": []
+  },
+  "1876890": {
+   "name_en": "Wandering Sword",
+   "name_zh": "逸剑风云决",
+   "type": "game",
+   "developers": [
+    "The Swordman Studio"
+   ],
+   "publishers": [
+    "Spiral Up Games"
+   ],
+   "genres": [
+    "冒险",
+    "独立",
+    "角色扮演",
+    "策略"
+   ],
+   "release": "2023 年 9 月 14 日",
+   "reviews": 37757,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1876890/ef32ad7a3d7bca74bd2d2d6b42c389491fd30493/header_schinese.jpg?t=1774667199",
+   "aliases": []
+  },
+  "1449690": {
+   "name_en": "The Walking Dead: The Telltale Definitive Series",
+   "name_zh": "The Walking Dead: The Telltale Definitive Series",
+   "type": "game",
+   "developers": [
+    "Skybound Games"
+   ],
+   "publishers": [
+    "Skybound Games"
+   ],
+   "genres": [
+    "冒险"
+   ],
+   "release": "2020 年 10 月 29 日",
+   "reviews": 37491,
+   "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1449690/header.jpg?t=1760651835",
+   "aliases": []
+  }
+ }
+}
