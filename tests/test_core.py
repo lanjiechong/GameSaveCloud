@@ -20,10 +20,13 @@ import sys
 import tempfile
 import time
 import unittest
+import json
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gamesave import chunker
+from gamesave import gamemeta
 from gamesave.chunker import CHUNK_SIZE
 from gamesave.models import (Game, Snapshot, FileEntry, ChunkRef,
                              RESOLVE_KEEP_LOCAL, RESOLVE_USE_REMOTE,
@@ -883,6 +886,249 @@ class TestAtomicSnapshotWrite(BaseSyncTest):
         self.assertFalse(os.path.exists(tmp))
         self.assertTrue(os.path.exists(
             os.path.join(self.vault.snapshots_dir, snap.id + ".json")))
+
+
+# ==================================================================
+# 14. 游戏元数据：中文名 / appid 解析（全程假网络，不碰真 Steam）
+# ==================================================================
+def _term_of(url):
+    """从搜索 URL 里把 term 抠出来，便于按候选词返回不同结果。"""
+    q = url.split("term=", 1)[1].split("&", 1)[0]
+    return urllib.parse.unquote(q)
+
+
+def _fake_fetch(mapping, default=None, details=None):
+    """按搜索词返回预设结果；details 给 appdetails 用（appid -> 英文名）。"""
+    def fetch(url):
+        if "appdetails" in url:
+            appid = url.split("appids=", 1)[1].split("&", 1)[0]
+            name = (details or {}).get(appid, "")
+            data = {"name": name} if name else {}
+            return json.dumps({appid: {"success": bool(name),
+                                       "data": data}}).encode("utf-8")
+        items = mapping.get(_term_of(url), default or [])
+        return json.dumps({"items": items}).encode("utf-8")
+    return fetch
+
+
+class TestMetaLookup(unittest.TestCase):
+    def test_chinese_store_name_wins(self):
+        fetch = _fake_fetch({
+            "只狼": [{"type": "app", "id": 814380, "name": "只狼：影逝二度"}],
+        })
+        res = gamemeta.lookup("只狼 Sekiro", fetch=fetch)
+        self.assertEqual(res["status"], gamemeta.STATUS_OK)
+        self.assertEqual(res["appid"], "814380")
+        self.assertEqual(res["name_zh"], "只狼：影逝二度")
+
+    def test_english_only_game_is_ok_not_error(self):
+        """Steam 查到但官方没中文名 —— 必须是 ok，否则每次刷新都重试。"""
+        fetch = _fake_fetch({
+            "Red Dead Redemption 2": [
+                {"type": "app", "id": 1174180, "name": "Red Dead Redemption 2"}],
+        })
+        res = gamemeta.lookup("荒野大镖客2 Red Dead Redemption 2", fetch=fetch)
+        self.assertEqual(res["status"], gamemeta.STATUS_OK)
+        self.assertEqual(res["appid"], "1174180")
+        self.assertEqual(res["name_zh"], "")
+        self.assertEqual(res["official_name"], "Red Dead Redemption 2")
+
+    def test_not_found(self):
+        res = gamemeta.lookup("根本不存在的游戏", fetch=lambda u: b'{"items": []}')
+        self.assertEqual(res["status"], gamemeta.STATUS_NOT_FOUND)
+        self.assertEqual(res["appid"], "")
+
+    def test_network_error(self):
+        def boom(url):
+            raise OSError("connection reset")
+        res = gamemeta.lookup("某游戏", fetch=boom)
+        self.assertEqual(res["status"], gamemeta.STATUS_ERROR)
+        self.assertTrue(res["error"])
+
+    def test_bad_json_is_error(self):
+        res = gamemeta.lookup("某游戏", fetch=lambda u: b"<html>502</html>")
+        self.assertEqual(res["status"], gamemeta.STATUS_ERROR)
+
+    def test_dlc_is_skipped(self):
+        fetch = _fake_fetch({
+            "测试游戏": [
+                {"type": "dlc", "id": 999, "name": "测试游戏 原声带"},
+                {"type": "app", "id": 100, "name": "测试游戏"},
+            ],
+        })
+        res = gamemeta.lookup("测试游戏", fetch=fetch)
+        self.assertEqual(res["appid"], "100")
+
+    def test_unrelated_result_rejected(self):
+        """名字对不上就当没搜到 —— 宁可没图标也不显示错的。"""
+        fetch = _fake_fetch({
+            "只狼": [{"type": "app", "id": 1, "name": "Totally Different Game"}],
+        })
+        res = gamemeta.lookup("只狼", fetch=fetch)
+        self.assertEqual(res["status"], gamemeta.STATUS_NOT_FOUND)
+
+    def test_search_terms_order(self):
+        terms = gamemeta.search_terms("荒野大镖客2 Red Dead Redemption 2")
+        self.assertEqual(terms[0], "Red Dead Redemption 2")   # 英文优先
+        self.assertIn("荒野大镖客2", terms)
+
+    def test_alias_expands_abbreviation(self):
+        self.assertEqual(gamemeta.search_terms("GTA V")[0],
+                         "Grand Theft Auto V")
+        self.assertIn("GTA V", gamemeta.search_terms("GTA V"))
+
+    def test_subtitle_extension_is_not_hijack(self):
+        """副标题靠分隔符接的是正常命名，靠空格硬接的是另一个产品。"""
+        self.assertTrue(gamemeta.name_match(
+            "Sekiro", "Sekiro™: Shadows Die Twice - GOTY Edition"))
+        self.assertFalse(gamemeta.name_match(
+            "Cyberpunk 2077", "Cyberpunk 2077 REDmod"))
+
+    def test_cross_language_uses_english_name(self):
+        """国区返回中文名时，用 appdetails 的英文名认亲，不能认成 DLC。"""
+        fetch = _fake_fetch(
+            {"Cyberpunk 2077": [
+                {"type": "app", "id": 1091500, "name": "赛博朋克 2077"},
+                {"type": "app", "id": 2138330,
+                 "name": "《赛博朋克 2077：往日之影》"},
+                {"type": "app", "id": 2060310,
+                 "name": "Cyberpunk 2077 REDmod"},
+            ]},
+            details={"1091500": "Cyberpunk 2077"})
+        res = gamemeta.lookup("赛博朋克2077 Cyberpunk 2077", fetch=fetch)
+        self.assertEqual(res["status"], gamemeta.STATUS_OK)
+        self.assertEqual(res["appid"], "1091500")
+        self.assertEqual(res["name_zh"], "赛博朋克 2077")
+
+    def test_no_space_name_resolved_via_english(self):
+        """目录名常是 SplitFiction 这种连写，靠英文名认回「双影奇境」。"""
+        fetch = _fake_fetch(
+            {"SplitFiction": [
+                {"type": "app", "id": 2001120, "name": "双影奇境"},
+                {"type": "app", "id": 3052150,
+                 "name": "《双影奇境》 - 好友通行证"},
+            ]},
+            details={"2001120": "Split Fiction"})
+        res = gamemeta.lookup("SplitFiction", fetch=fetch)
+        self.assertEqual(res["appid"], "2001120")
+        self.assertEqual(res["name_zh"], "双影奇境")
+
+    def test_english_subtitle_does_not_hijack(self):
+        """英文名被追加副标题的多半是 DLC / 工具，不能当成本体。"""
+        self.assertFalse(gamemeta.name_match("Cyberpunk 2077",
+                                             "Cyberpunk 2077 REDmod"))
+        self.assertTrue(gamemeta.name_match("只狼", "只狼：影逝二度"))
+
+    def test_pick_chinese(self):
+        self.assertEqual(gamemeta.pick_chinese(["Elden Ring", "艾尔登法环"]),
+                         "艾尔登法环")
+        self.assertEqual(gamemeta.pick_chinese(["Elden Ring"]), "")
+
+    def test_logo_urls(self):
+        urls = gamemeta.logo_urls("1174180")
+        self.assertIn("1174180", urls[0])
+        self.assertTrue(urls[0].endswith(".png"))
+        self.assertEqual(gamemeta.logo_urls(""), ())
+
+
+# ==================================================================
+# 15. 元数据落库：patch 语义 + 回填到 Game
+# ==================================================================
+class TestMetaStorage(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gsc_meta_")
+        self.vault = Vault(os.path.join(self.tmp, "vault"))
+        self.game = self.vault.add_game("测试游戏 Test Game", [self.tmp])
+
+    def tearDown(self):
+        self.vault.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_patch_keeps_untouched_fields(self):
+        """一次只补到图标时，不能把上一轮拿到的中文名抹掉。"""
+        self.vault.save_meta(self.game.id, name_zh="测试游戏",
+                             state="ok", attempts=1)
+        self.vault.save_meta(self.game.id, logo_file="abc.png")
+        m = self.vault.get_meta(self.game.id)
+        self.assertEqual(m["name_zh"], "测试游戏")
+        self.assertEqual(m["logo_file"], "abc.png")
+        self.assertEqual(m["attempts"], 1)
+        self.assertEqual(m["state"], "ok")
+
+    def test_list_games_applies_meta(self):
+        self.vault.save_meta(self.game.id, name_zh="测试游戏",
+                             logo_file="x.png", state="ok")
+        g = self.vault.list_games()[0]
+        self.assertEqual(g.name_zh, "测试游戏")
+        self.assertEqual(g.logo_file, "x.png")
+        self.assertEqual(g.meta_state, "ok")
+        self.assertEqual(g.display_name, "测试游戏")
+
+    def test_display_name_falls_back_to_original(self):
+        g = self.vault.list_games()[0]
+        self.assertEqual(g.name_zh, "")
+        self.assertEqual(g.display_name, g.name)
+
+    def test_get_game_applies_meta(self):
+        self.vault.save_meta(self.game.id, name_zh="测试游戏")
+        self.assertEqual(self.vault.get_game(self.game.id).name_zh, "测试游戏")
+
+    def test_remove_game_clears_meta(self):
+        self.vault.save_meta(self.game.id, name_zh="测试游戏")
+        self.vault.remove_game(self.game.id)
+        self.assertIsNone(self.vault.get_meta(self.game.id))
+
+    def test_meta_survives_reopen(self):
+        """重启后能直接读到本地数据，不用重新匹配。"""
+        self.vault.save_meta(self.game.id, name_zh="测试游戏", logo_file="x.png")
+        path = self.vault.root
+        self.vault.close()
+        v2 = Vault(path)
+        try:
+            g = v2.list_games()[0]
+            self.assertEqual(g.name_zh, "测试游戏")
+            self.assertEqual(g.logo_file, "x.png")
+        finally:
+            v2.close()
+
+
+# ==================================================================
+# 16. 匹配调度：什么时候该跳过、什么时候该重试
+# ==================================================================
+class TestMetaScheduling(unittest.TestCase):
+    def test_complete_is_skipped(self):
+        meta = {"name_zh": "某游戏", "state": "ok"}
+        self.assertTrue(gamemeta.is_complete("X", meta, True))
+        self.assertFalse(gamemeta.should_attempt("X", meta, True))
+
+    def test_missing_logo_still_attempts(self):
+        meta = {"name_zh": "某游戏", "state": "ok"}
+        self.assertFalse(gamemeta.is_complete("X", meta, False))
+        self.assertTrue(gamemeta.should_attempt("X", meta, False))
+
+    def test_name_with_cjk_counts_even_without_meta(self):
+        self.assertTrue(gamemeta.has_chinese_name("荒野大镖客2 RDR2", None))
+
+    def test_ok_without_chinese_name_does_not_loop(self):
+        """查到了但没中文名 → 算「中文名已尽力」，不能无限重试。"""
+        self.assertTrue(gamemeta.has_chinese_name("RDR2", {"state": "ok"}))
+        self.assertTrue(gamemeta.is_complete("RDR2", {"state": "ok"}, True))
+
+    def test_not_found_still_needs_match(self):
+        self.assertFalse(gamemeta.has_chinese_name("RDR2", {"state": "not_found"}))
+
+    def test_backoff_blocks_then_expires(self):
+        now = 1000.0
+        meta = {"state": "not_found", "next_retry_at": now + 60}
+        self.assertFalse(gamemeta.should_attempt("X", meta, False, now))
+        self.assertTrue(gamemeta.should_attempt("X", meta, False, now + 61))
+
+    def test_retry_delay_grows_and_caps(self):
+        self.assertEqual(gamemeta.retry_delay(1), gamemeta.RETRY_BASE)
+        self.assertEqual(gamemeta.retry_delay(2), gamemeta.RETRY_BASE * 2)
+        self.assertEqual(gamemeta.retry_delay(3), gamemeta.RETRY_BASE * 4)
+        self.assertLessEqual(gamemeta.retry_delay(99), gamemeta.RETRY_MAX)
+        self.assertEqual(gamemeta.retry_delay(0), gamemeta.RETRY_BASE)
 
 
 if __name__ == "__main__":

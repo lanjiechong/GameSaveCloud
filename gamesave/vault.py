@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS sync_state(
 CREATE TABLE IF NOT EXISTS local_copies(
   id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT, path TEXT,
   backup_path TEXT, created_at REAL, reason TEXT);
+CREATE TABLE IF NOT EXISTS game_meta(
+  game_id TEXT PRIMARY KEY, name_zh TEXT, official_name TEXT, appid TEXT,
+  logo_file TEXT, source TEXT, state TEXT, attempts INTEGER DEFAULT 0,
+  checked_at REAL DEFAULT 0, next_retry_at REAL DEFAULT 0, error TEXT);
 """
 
 
@@ -173,6 +177,8 @@ class Vault:
 
     def remove_game(self, game_id: str, keep_snapshots: bool = True):
         self.db.execute("DELETE FROM games WHERE id=?", (game_id,))
+        # 元数据跟着走：重新添加会生成新的 game_id，旧行留着只是垃圾。
+        self.db.execute("DELETE FROM game_meta WHERE game_id=?", (game_id,))
         if not keep_snapshots:
             for s in self.list_snapshots(game_id):
                 self.delete_snapshot(s.id)
@@ -182,17 +188,65 @@ class Vault:
         r = self.db.execute_one("SELECT * FROM games WHERE id=?", (game_id,))
         if not r:
             raise KeyError("游戏不存在: %s" % game_id)
-        return Game(id=r["id"], name=r["name"], paths=json.loads(r["paths"]),
-                    platform=r["platform"], auto_scan=bool(r["auto_scan"]),
-                    created_at=r["created_at"], note=r["note"])
+        g = Game(id=r["id"], name=r["name"], paths=json.loads(r["paths"]),
+                 platform=r["platform"], auto_scan=bool(r["auto_scan"]),
+                 created_at=r["created_at"], note=r["note"])
+        return self._apply_meta(g, self.get_meta(game_id))
 
     def list_games(self) -> list:
+        # 元数据一次全取再按 id 映射，避免每款游戏各查一次（N+1）。
+        metas = self.list_meta()
         out = []
         for r in self.db.execute("SELECT * FROM games ORDER BY name"):
-            out.append(Game(id=r["id"], name=r["name"], paths=json.loads(r["paths"]),
-                            platform=r["platform"], auto_scan=bool(r["auto_scan"]),
-                            created_at=r["created_at"], note=r["note"]))
+            g = Game(id=r["id"], name=r["name"], paths=json.loads(r["paths"]),
+                     platform=r["platform"], auto_scan=bool(r["auto_scan"]),
+                     created_at=r["created_at"], note=r["note"])
+            out.append(self._apply_meta(g, metas.get(g.id)))
         return out
+
+    @staticmethod
+    def _apply_meta(g: Game, m) -> Game:
+        """把 game_meta 的一行贴到 Game 上。缺行时保持默认空值。"""
+        if m:
+            g.name_zh = m.get("name_zh") or ""
+            g.logo_file = m.get("logo_file") or ""
+            g.meta_state = m.get("state") or ""
+        return g
+
+    # ==========================================================
+    # 游戏元数据（中文名 / 图标文件名 / 匹配状态）
+    # ==========================================================
+    META_FIELDS = ("name_zh", "official_name", "appid", "logo_file",
+                   "source", "state", "attempts", "checked_at",
+                   "next_retry_at", "error")
+
+    def get_meta(self, game_id: str):
+        r = self.db.execute_one("SELECT * FROM game_meta WHERE game_id=?",
+                                (game_id,))
+        return dict(r) if r else None
+
+    def list_meta(self) -> dict:
+        return {r["game_id"]: dict(r)
+                for r in self.db.execute("SELECT * FROM game_meta")}
+
+    def save_meta(self, game_id: str, **fields):
+        """写元数据。只覆盖传进来的键，其余沿用旧值。
+
+        刻意做成 patch 语义：一次匹配可能只补到图标没补到中文名
+        （反之亦然），整行覆盖会把上一轮拿到的成果抹掉。
+        """
+        cur = self.get_meta(game_id) or {}
+        row = {k: fields.get(k, cur.get(k)) for k in self.META_FIELDS}
+        self.db.execute(
+            "INSERT OR REPLACE INTO game_meta(game_id,name_zh,official_name,"
+            "appid,logo_file,source,state,attempts,checked_at,next_retry_at,error)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (game_id, row["name_zh"] or "", row["official_name"] or "",
+             row["appid"] or "", row["logo_file"] or "", row["source"] or "",
+             row["state"] or "", int(row["attempts"] or 0),
+             float(row["checked_at"] or 0.0),
+             float(row["next_retry_at"] or 0.0), row["error"] or ""))
+        self.db.commit()
 
     # ==========================================================
     # 快照：扫描 + 分块 + 去重落盘

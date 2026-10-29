@@ -3,6 +3,53 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.2.0] - 2026-10-30
+
+### 新增
+
+- **图标与中文名自动匹配**：扫描或刷新后，自动为每款游戏补齐图标与
+  官方中文名。列表优先显示中文名，原名挂 tooltip，对照存档目录不丢线索。
+- **增量匹配**：只处理「缺图标或缺中文名」的游戏，已有的一个网络请求
+  都不发。匹配成功后图标按 `game_id` 落盘、中文名写进 `game_meta` 表，
+  下次启动直接读本地数据，不再重复联网。
+- **失败不影响列表**：匹配失败只记状态、保留原名与占位图标，界面照常
+  可用；失败次数按 10 分钟 → 翻倍 → 封顶 7 天退避，后续刷新自动重试。
+- **不阻塞刷新**：匹配跑在独立线程池（3 并发），刷新先把列表渲染出来，
+  结果逐个回填并就地重绘。左侧标题栏显示「匹配中 n/N」，完成后写日志汇总。
+- 中文名来源三层：Steam 国区商店名（`l=schinese`）→ 可选离线 logo 包里的
+  社区译名 → 原名。Steam 查到但官方无中文名时记为 `ok`，
+  不会因为「永远缺中文名」反复重试。
+
+### 变更
+
+- `gamesave/gamemeta.py`（新）：Steam 搜索、名字校验、中文名挑选、退避策略。
+  纯 stdlib，不依赖 PySide6，可用假 fetch 完整单测。
+- `ui/metaservice.py`（新）：批量匹配调度。工作线程只做网络 + 解码，
+  QPixmap 转换与落盘留在主线程。
+- `ui/logos.py`：删掉原先「按名字异步联网取图」的整条链路（`request` /
+  `logo_ready`），联网职责统一收敛到 `MetaService`；本模块改为纯本地、
+  同步返回，新增按 `game_id` 取图与落盘。
+- 名字归一化 / 相似度判定从 `ui/logos.py` 下沉到 `gamesave/gamemeta.py`，
+  两处不再各写一份。
+- `game_meta` 表（`index.db`）新增，`Game` 增加 `name_zh` / `logo_file` /
+  `meta_state` 与 `display_name` 属性；`games` 表结构未变。
+
+### 修复
+
+- **跨语言误匹配**：国区搜索结果返回中文名（「赛博朋克 2077」），
+  与英文查询词做字符串相似度必然是 0，导致正确条目被排除、反而选中
+  名字里恰好带查询词的 DLC / 工具。实测 `Cyberpunk 2077` 命中
+  `2060310 REDmod` 而不是本体 `1091500`；`SplitFiction` 明明返回了
+  「双影奇境」却一条都匹配不上。改为先判定搜索结果第一条、
+  必要时用 `appdetails` 的英文名复核。
+- **副标题被当成另一款游戏**：`Sekiro` 匹配 `Sekiro™: Shadows Die
+  Twice - GOTY Edition` 时因长度差被判「不像」。现在区分「靠分隔符
+  接副标题」（正常命名）与「靠空格硬接一截」（多半是别的产品）。
+- 常见缩写（`GTA V` / `RDR2`）先展开成全名再搜，否则永远搜不到。
+- 两字中文标题（「只狼」vs「只狼：影逝二度」）原先被 `len>=3` 的包含
+  判定挡住，永远匹配不上。改为「查询词是候选子串时，含汉字的
+  两字词也算命中」。
+
 ## [1.1.0] - 2026-10-15
 
 ### 新增
@@ -81,5 +128,6 @@
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.2.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.2.0
 [1.1.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.1.0
 [1.0.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.0.0

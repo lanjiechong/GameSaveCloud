@@ -64,6 +64,17 @@ def main():
     w = MainWindow()
     w._shown_modals = shown_modals
 
+    # 匹配服务换成假查找器：冒烟测试全程离线，绝不真去连 Steam。
+    # 名字里带 FakeGame 的当作「查到了且有中文名」，其余当作没搜到。
+    def fake_lookup(name, **_kw):
+        if "FakeGame" in name:
+            return {"status": "ok", "appid": "", "official_name": "FakeGame",
+                    "name_zh": "假游戏", "error": ""}
+        return {"status": "not_found", "appid": "", "official_name": "",
+                "name_zh": "", "error": ""}
+
+    w.meta._lookup = fake_lookup
+
     # --- 造一个假游戏 + 假存档，让后台任务有活干 ---
     gamedir = os.path.join(TMP, "FakeGame", "saves")
     os.makedirs(gamedir, exist_ok=True)
@@ -246,9 +257,54 @@ def main():
         direct = QPixmap(os.path.join(pack_dir, "1174180.png"))
         check("RDR2 图标就是离线包里的那个文件",
               pm is not None and pm.toImage() == direct.toImage())
-        ls.request("荒野大镖客2 Red Dead Redemption 2")
-        check("包内已有且图片存在的游戏不触发联网请求", not ls._pending,
-              "pending=%r" % (ls._pending,))
+        check("包内已有图片时 has_pack_logo 判定为真",
+              ls.has_pack_logo("荒野大镖客2 Red Dead Redemption 2"))
+
+    print("== 7. 图标与中文名匹配（假查找器，全程离线） ==")
+    import time as _time
+    from ui.game_list import ROLE_GAME
+    from PySide6.QtGui import QColor, QPixmap
+
+    w.meta.wait_idle(8000)
+    pump(ms=800, rounds=4)
+    logtext = w.log_view.toPlainText()
+    check("匹配完成后有汇总日志", "图标与中文名匹配完成" in logtext)
+    check("匹配期间不阻塞刷新（busy 已回落）", w.busy is False)
+
+    g2 = w.vault.get_game(g.id)
+    check("中文名已落库", g2.name_zh == "假游戏", repr(g2.name_zh))
+    check("匹配状态记为 ok", g2.meta_state == "ok", repr(g2.meta_state))
+    check("display_name 用中文名", g2.display_name == "假游戏")
+    cur = w.game_list.item(0).data(ROLE_GAME)
+    check("列表项已回填中文名", getattr(cur, "name_zh", "") == "假游戏",
+          repr(getattr(cur, "name_zh", "")))
+
+    pm2 = QPixmap(96, 96)
+    pm2.fill(QColor("#336699"))
+    fname = w.logos.save_game_icon(g.id, pm2)
+    check("图标按 game_id 落盘", bool(fname) and os.path.isfile(
+        os.path.join(w.logos.icons_dir, fname)), repr(fname))
+    w.vault.save_meta(g.id, logo_file=fname)
+    g3 = w.vault.get_game(g.id)
+    check("图标文件名写回数据库", g3.logo_file == fname, repr(g3.logo_file))
+    check("pixmap_for_game 能读回落盘的图标",
+          not w.logos.pixmap_for_game(g3).isNull())
+    check("has_game_icon 认可落盘图标", w.logos.has_game_icon(g3))
+    check("图标和中文名都齐了就不再排队", w.meta.ensure([g3]) == 0)
+
+    # 失败分支：查不到 → 保留原名、写退避、不炸列表
+    gx = w.vault.add_game("NoSuchGame XYZ", [gamedir], platform="测试")
+    w.meta.ensure([gx])
+    w.meta.wait_idle(8000)
+    pump(ms=600, rounds=3)
+    mx = w.vault.get_meta(gx.id)
+    check("匹配失败记为 not_found", bool(mx) and mx["state"] == "not_found",
+          repr(mx and mx["state"]))
+    check("失败后写入退避时间", bool(mx) and mx["next_retry_at"] > _time.time(),
+          repr(mx and mx["next_retry_at"]))
+    check("失败不影响原名显示",
+          w.vault.get_game(gx.id).display_name == "NoSuchGame XYZ")
+    check("退避期内不会重复排队", w.meta.ensure([w.vault.get_game(gx.id)]) == 0)
 
     # --- 汇总 ---
     print()

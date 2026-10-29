@@ -37,6 +37,7 @@ from .dialogs import (ConfirmDialog, ConflictDialog, AddGameDialog,
 from .workers import run_async, OperationCancelled
 from .game_list import GameItemDelegate, ROLE_GAME, ROLE_STATUS, ROLE_CLOUD
 from .logos import LogoService
+from .metaservice import MetaService
 from gamesave.config import Config
 from gamesave.vault import Vault
 from gamesave.remote import LocalFolderBackend, WebDAVBackend, RemoteError
@@ -85,10 +86,15 @@ class MainWindow(QMainWindow):
         self.statuses = {}          # game_id -> GameStatus
         self.busy = False
         self.last_plan = None
-        # 图标服务：磁盘缓存 → 内置预设 → 联网检索 → 占位兜底
-        self.logos = LogoService(cache_dir=os.path.join(
-            self.cfg.base, "logocache"))
-        self.logos.logo_ready.connect(self._on_logo_ready)
+        # 图标服务：已匹配图标 → 磁盘缓存 → 内置预设 → 联网检索 → 占位兜底
+        self.icons_dir = os.path.join(self.cfg.base, "gameicons")
+        self.logos = LogoService(cache_dir=os.path.join(self.cfg.base, "logocache"),
+                                 icons_dir=self.icons_dir)
+        # 中文名 + 图标的批量匹配：刷新后异步跑，绝不阻塞列表
+        self.meta = MetaService(self.vault, self.logos, self)
+        self.meta.meta_ready.connect(self._on_meta_ready)
+        self.meta.progress.connect(self._on_meta_progress)
+        self.meta.finished.connect(self._on_meta_done)
 
         self._build_ui()
         self._build_tray()
@@ -180,6 +186,11 @@ class MainWindow(QMainWindow):
         head = QHBoxLayout()
         head.addWidget(QLabel("游戏"))
         head.addStretch(1)
+        # 匹配进度：只在有任务时出现，不占常驻空间
+        self.match_chip = QLabel()
+        self.match_chip.setObjectName("ModeChip")
+        self.match_chip.hide()
+        head.addWidget(self.match_chip)
         self.mode_chip = QLabel()
         self.mode_chip.setObjectName("ModeChip")
         head.addWidget(self.mode_chip)
@@ -330,9 +341,9 @@ class MainWindow(QMainWindow):
                 it.setData(ROLE_STATUS, s)
                 it.setData(ROLE_CLOUD, self.cloud_on)
                 self.game_list.addItem(it)
-                # 图标：先给内置预设/占位（立即可见），再异步联网找真图
-                self.logos.pixmap(g.name)
-                self.logos.request(g.name)
+                # 先用已有图标渲染（已匹配的 / 离线包里的 / 内置预设 / 占位），
+                # 联网补齐交给 MetaService 异步跑，不阻塞这一帧。
+                self.logos.pixmap_for_game(g)
             self._update_vault_info()
             self._update_mode_ui(sts)
             if self.game_list.count():
@@ -344,21 +355,68 @@ class MainWindow(QMainWindow):
             if merged:
                 self._log("已合并 %d 个完全相同的重复备份" % merged)
             self._log("刷新完成，共 %d 款游戏" % len(games))
+            # 只给「缺图标或中文名」的排队，已有的一个网络请求都不发
+            self._start_meta_match(games)
 
         run_async(job, on_result=done,
                   on_error=lambda e: (self._set_busy(False), self._err_bg(e)))
 
-    def _on_logo_ready(self, name):
-        """联网图标到手了，把同名条目重绘一遍。
+    # ==========================================================
+    # 图标 + 中文名匹配
+    # ==========================================================
+    def _start_meta_match(self, games):
+        """刷新收尾时排一轮匹配。只处理缺图标/缺中文名的游戏。
 
-        只重绘受影响的几行，不整表刷新 —— 整表刷新会把选中位置和
-        滚动位置也一起重置。
+        调用点只有刷新完成之后，所以此时 busy 已经落下、列表已经能操作，
+        匹配在后台跑，用户该干什么干什么。
         """
+        try:
+            n = self.meta.ensure(games)
+        except Exception as e:
+            # 匹配是锦上添花，调度失败绝不能影响刷新本身
+            self._log("匹配调度失败：%s" % e)
+            return
+        if n:
+            self._log("正在为 %d 款游戏匹配图标与中文名…" % n)
+
+    def _on_meta_progress(self, done, total):
+        if total <= 0:
+            self.match_chip.hide()
+            return
+        self.match_chip.setText("匹配中 %d/%d" % (done, total))
+        self.match_chip.setStyleSheet(
+            "background:%s; color:%s; border-radius:9px;"
+            "padding:2px 9px; font-size:11px;"
+            % (PALETTE["unknown_bg"], PALETTE["muted"]))
+        self.match_chip.show()
+
+    def _on_meta_done(self, ok, bad):
+        self.match_chip.hide()
+        if not ok and not bad:
+            return
+        tail = "；失败的会在后续刷新时重试" if bad else ""
+        self._log("图标与中文名匹配完成：成功 %d 款，失败 %d 款%s" % (ok, bad, tail))
+
+    def _on_meta_ready(self, game):
+        """某款游戏匹配完（成功或失败），就地重绘它那一行。
+
+        按 game_id 找条目而不是按位置：匹配期间用户可能点了刷新，
+        列表已经重建，位置会变，但 id 不会。
+        """
+        hit = False
         for i in range(self.game_list.count()):
             it = self.game_list.item(i)
-            g = it.data(ROLE_GAME)
-            if g is not None and g.name == name:
+            cur = it.data(ROLE_GAME)
+            if cur is not None and getattr(cur, "id", "") == game.id:
+                it.setData(ROLE_GAME, game)
                 self.game_list.update(self.game_list.indexFromItem(it))
+                hit = True
+                break
+        if not hit:
+            return
+        sel = self.current_game()
+        if sel is not None and getattr(sel, "id", "") == game.id:
+            self._refresh_detail(game)
 
     def _update_mode_ui(self, sts=None):
         """按云端开关切换按钮文案与模式标签。
@@ -409,7 +467,10 @@ class MainWindow(QMainWindow):
     def _refresh_detail(self, g):
         s = self.statuses.get(g.id) or GameStatus(game_id=g.id)
         on = self.cloud_on
-        self.lbl_title.setText(g.name)
+        # 卡片标题跟着列表走：匹配到中文名就显示中文名，原名挂 tooltip
+        self.lbl_title.setText(g.display_name)
+        self.lbl_title.setToolTip(
+            g.name if g.name_zh and g.name_zh != g.name else "")
         self.lbl_state.setText(state_label(s.state, on))
         self.lbl_state.setStyleSheet(
             "color:%s; font-weight:700; padding:2px 10px; border-radius:10px;"

@@ -10,12 +10,28 @@ from typing import List, Optional
 @dataclass
 class Game:
     id: str                      # 稳定标识（路径的短哈希）
-    name: str
+    name: str                    # 扫描/添加时的名字，是游戏的稳定标识，不随匹配改变
     paths: List[str]             # 存档目录，可多个
     platform: str = ""           # Steam / Epic / 独立 ...（仅作展示）
     auto_scan: bool = True       # 是否参与定时自动备份
     created_at: float = 0.0
     note: str = ""
+
+    # ---- 元数据（来自 game_meta 表，由 gamemeta 匹配后回填）----
+    # 这三个字段不参与 add_game/save_game：它们存在独立的表里，
+    # 匹配失败、清空缓存都不该影响「游戏本身」这条记录。
+    name_zh: str = ""            # 匹配到的官方中文名，空则界面显示 name
+    logo_file: str = ""          # 图标文件名（相对图标目录），不是绝对路径
+    meta_state: str = ""         # ok / not_found / error / 空（从未匹配）
+
+    @property
+    def display_name(self) -> str:
+        """界面显示用：优先中文名，没有就退回原名。
+
+        匹配失败（name_zh 为空）时界面完全不受影响，这是需求里
+        「保留游戏原有信息」的落点。
+        """
+        return self.name_zh or self.name
 
 
 # ---------- 单个文件的快照相册 ----------

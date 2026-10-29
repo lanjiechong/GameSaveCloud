@@ -80,8 +80,8 @@ class GameItemDelegate(QStyledItemDelegate):
             self._paint_background(painter, option)
             if game is None:
                 return
-            self._paint_icon(painter, option, game.name)
-            self._paint_texts(painter, option, game.name, st, cloud_on)
+            self._paint_icon(painter, option, game)
+            self._paint_texts(painter, option, game, st, cloud_on)
             self._paint_dot(painter, option, st)
         finally:
             painter.restore()
@@ -104,17 +104,19 @@ class GameItemDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(r, RADIUS, RADIUS)
 
     # ---------- 图标 ----------
-    def _paint_icon(self, painter, option, name):
+    def _paint_icon(self, painter, option, game):
         top = option.rect.top() + (ROW_H - ICON) // 2
         target = QRect(option.rect.left() + MARGIN_X + 4, top, ICON, ICON)
         pm = None
         if self.logos is not None:
             try:
-                pm = self.logos.pixmap(name)
+                # 优先用匹配阶段按 game_id 落盘的图标；
+                # 没有就走「缓存 → 离线包 → 内置预设 → 占位」链路。
+                pm = self.logos.pixmap_for_game(game)
             except Exception:
                 pm = None
         if pm is None or pm.isNull():
-            # 理论上 LogoService.pixmap 永远不返回 None；真出了问题
+            # 理论上 pixmap_for_game 永远不返回 None；真出了问题
             # 画个空框，也别让整行消失。
             painter.setPen(QPen(QColor(PALETTE["border"]), 1))
             painter.setBrush(QColor(PALETTE["panel"]))
@@ -123,7 +125,7 @@ class GameItemDelegate(QStyledItemDelegate):
         painter.drawPixmap(target, pm)
 
     # ---------- 文本两栏 ----------
-    def _paint_texts(self, painter, option, name, st, cloud_on):
+    def _paint_texts(self, painter, option, game, st, cloud_on):
         tx = option.rect.left() + MARGIN_X + 4 + ICON + GAP
         right = option.rect.right() - MARGIN_X - DOT - DOT_GAP
         avail = max(right - tx, 40)
@@ -135,7 +137,8 @@ class GameItemDelegate(QStyledItemDelegate):
         name_rect = QRect(tx, top, avail, h_name)
         sub_rect = QRect(tx, top + h_name + LINE_GAP, avail, h_sub)
 
-        # 名称：超长省略号
+        # 名称：优先中文名；没匹配到就用原名，两者都不缺时不会显示空白
+        name = getattr(game, "display_name", "") or getattr(game, "name", "")
         painter.setFont(self._f_name)
         painter.setPen(QColor(PALETTE["text"]))
         painter.drawText(name_rect,
@@ -176,7 +179,11 @@ class GameItemDelegate(QStyledItemDelegate):
             st = index.data(ROLE_STATUS)
             cloud_on = bool(index.data(ROLE_CLOUD))
             if game is not None:
-                lines = ["<b>%s</b>" % _esc(game.name)]
+                title = getattr(game, "display_name", "") or game.name
+                lines = ["<b>%s</b>" % _esc(title)]
+                # 列表上显示的是中文名，原名放这里，方便对照存档目录
+                if getattr(game, "name_zh", "") and game.name_zh != game.name:
+                    lines.append("原名：%s" % _esc(game.name))
                 if game.paths:
                     lines.append("存档目录：%s" % _esc("、".join(game.paths)))
                 if st is not None:

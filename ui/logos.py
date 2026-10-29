@@ -4,21 +4,23 @@
 
 逐级保障，任何一层失败都不会出现空白、破图或布局错位：
 
-    1. 已下载缓存    磁盘缓存命中 → 直接返回，离线也能用
-    2. 可选 logo 包  用户自行安装到本机的离线 logo 包
+    1. 匹配落盘      按 game_id 存下的图标（匹配阶段写入），换名也不丢
+    2. 磁盘缓存      按名字哈希的旧版缓存，兼容历史数据
+    3. 可选 logo 包  用户自行安装到本机的离线 logo 包
                      （%LOCALAPPDATA%\\GameSaveCloud\\logopack\\，
                      或开发目录 ui/assets/logos/，两者都可缺省）。
                      **仓库与发布包不含任何第三方游戏 logo** —— 商标素材
                      只在运行时从 Steam CDN 获取，不在本项目里再分发。
-    3. 内置预设      其余常见游戏有预置配色与代号，**立刻可画**
-    4. 联网检索      都没命中再走 Steam 公开接口找真实 logo
+    4. 内置预设      预置配色与代号，**断网也立刻可画**
     5. 占位兜底      全部失败时画一个「首字母色块」，
                      尺寸、圆角、位置与真实图标完全一致
 
-（逻辑上仍是上面 5 层，只是第 2 层的 logo 包从「随程序内置」改为
-「用户可选安装」，因此全新安装、零配置时走的是 1→3→4→5。）
+本模块**只做本地、全程同步返回、绝不联网**。真正的联网补齐（搜 Steam、
+下 logo、解析中文名）由 metaservice.MetaService 在后台线程池里做，
+成功后落盘再回填到这里 —— 列表永远是先出来、图后跟上，
+不会因为网络卡住整个界面。
 
-图标来源（联网那一层）：
+图标来源（由 metaservice 驱动）：
     Steam 商店搜索 API（免密钥）
         https://store.steampowered.com/api/storesearch/?term=<游戏名>&cc=cn&l=schinese
      返回 appid 后取图片：
@@ -26,36 +28,41 @@
         https://cdn.akamai.steamstatic.com/steam/apps/<appid>/header.jpg   ← 兜底
 
 为什么用 Steam：游戏覆盖面最广、免申请 key、有公开 CDN。
-风险是名称匹配可能对不上，所以加了一道相似度校验 ——
+风险是名称匹配可能对不上，所以加了一道相似度校验（gamesave.gamemeta）——
 对不上就当作没找到，回落到预设/占位，绝不显示一张来路不明的图。
 
 关于名字：扫描器给游戏起的是「中文俗名 英文名」组合名
 （如「荒野大镖客2 Red Dead Redemption 2」），而 Steam 只认官方名，
-整个组合名丢进去搜不到任何东西。所以联网检索会拆出英文部分优先搜；
+整个组合名丢进去搜不到任何东西。所以检索会拆出英文部分优先搜；
 可选离线 logo 包则用「精确 / 包含 / 分词」四级名字匹配，天然兼容组合名。
 
 可选离线 logo 包的构建：scripts/fetch_top_logos.py（维护工具，需联网+Pillow，
 产物默认写到开发目录 ui/assets/logos/，已被 .gitignore 排除；
 也可加 --out 输出到 %LOCALAPPDATA%\\GameSaveCloud\\logopack\\）。
 
-所有网络 IO 都在工作线程里跑，主线程只收信号。
+QPixmap / QPainter 只能在 GUI 线程用，所以本模块的所有公开方法都
+必须在主线程调用；工作线程只允许用 fetch_bytes / fetch_logo_image
+（它们只跟 bytes 和 QImage 打交道）。
 """
 import hashlib
 import json
 import os
 import sys
-import threading
 import urllib.error
-import urllib.parse
 import urllib.request
 import zlib
 
-from PySide6.QtCore import QObject, QThreadPool, Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QImage, QLinearGradient,
                            QPainter, QPainterPath, QPen, QPixmap)
 
+from gamesave import gamemeta
+# 名字归一化只有一份实现（在 gamesave/gamemeta.py），这里用别名保留
+# 原有调用写法，避免两处逻辑各自漂移。
+from gamesave.gamemeta import has_cjk, norm_name as _norm
+
 TILE = 96                      # 图标绘制尺寸（超采样，显示时缩到 40 左右更清晰）
-UA = "Mozilla/5.0 (compatible; GameSaveCloud/1.0)"
+UA = "Mozilla/5.0 (compatible; GameSaveCloud/1.2)"
 TIMEOUT = 12
 
 # 常见热门游戏预置：名字 → (主色, 短代号)
@@ -251,56 +258,24 @@ def _pack_lookup(name: str):
     return None
 
 
-def _norm(s: str) -> str:
-    """归一化名字：小写、只留字母数字。用于匹配与查表。"""
-    return "".join(ch for ch in s.lower() if ch.isalnum())
+class LogoService:
+    """按游戏取图标。
 
-
-def _similar(a: str, b: str) -> float:
-    """0~1 的字符串相似度，用标准库 difflib，不引第三方。"""
-    import difflib
-    return difflib.SequenceMatcher(None, a, b).ratio()
-
-
-def _name_match(query: str, candidate: str) -> bool:
-    """判断 Steam 搜到的结果是不是我们要的那款。
-
-    宁可判「不像」也不能显示一张来路不明的图 —— 错的 logo 比
-    没有 logo 更误导人。判据：完全相等 / 互相包含 / 相似度够高。
+    只做「本地能拿到什么」：匹配阶段落盘的图标 → 按名字的磁盘缓存 →
+    可选离线包 → 内置绘制预设 → 占位兜底，全部同步返回，不联网。
+    联网补齐由 metaservice.MetaService 负责，两者职责分开。
     """
-    q, c = _norm(query), _norm(candidate)
-    if not q or not c:
-        return False
-    if q == c:
-        return True
-    # 互相包含（处理「艾尔登法环」vs「ELDEN RING」译名差异，
-    # 以及「巫师3」vs「巫师3：狂猎」这种简称/全称）
-    if len(q) >= 3 and len(c) >= 3 and (q in c or c in q):
-        return True
-    return _similar(q, c) >= 0.62
 
-
-class LogoService(QObject):
-    """异步取图标，取到了发 logo_ready(游戏名)。"""
-
-    logo_ready = Signal(str)
-
-    def __init__(self, cache_dir: str = None, parent=None):
-        super().__init__(parent)
+    def __init__(self, cache_dir: str = None, icons_dir: str = None):
         self.cache_dir = cache_dir or os.path.join(os.path.expanduser("~"),
                                                    ".gamesavecloud", "logocache")
+        # 按 game_id 存的图标：匹配成功后落盘，路径记进 game_meta.logo_file。
+        # 与按名字哈希的 logocache 分开：改名、换语言、重装都不会丢图。
+        self.icons_dir = icons_dir or os.path.join(
+            os.path.dirname(self.cache_dir), "gameicons")
         os.makedirs(self.cache_dir, exist_ok=True)
-        self._pixmaps = {}        # 归一化名字 -> QPixmap（内存缓存）
-        self._pending = set()     # 正在请求中的名字，避免重复发请求
-        self._failed = set()      # 已知取不到的名字，不再重试
-        # 专门的线程池：限 4 并发，避免一次刷新把网络打满
-        self._pool = QThreadPool()
-        self._pool.setMaxThreadCount(4)
-        # 运行中 worker 的强引用。QThreadPool.start() 不持 Python 侧引用，
-        # 不自己留一份的话，GC 可能在 run() 还没跑完时把 Worker 连同它的
-        # signals 一起回收，logo_ready 就永远发不出来。
-        self._active = set()
-        self._active_lock = threading.Lock()
+        os.makedirs(self.icons_dir, exist_ok=True)
+        self._pixmaps = {}        # 归一化名字 / "g:<game_id>" -> QPixmap（内存缓存）
 
     # ==========================================================
     # 对外接口
@@ -325,6 +300,127 @@ class LogoService(QObject):
         # 3. 内置绘制预设（断网也有像样的图标）
         return self._draw_builtin(name)
 
+    # ---------- 按 Game 记录取图（匹配阶段落盘的那张优先） ----------
+    def pixmap_for_game(self, game) -> QPixmap:
+        """取某款游戏的图标。永远不返回 None。
+
+        优先级：按 game_id 落盘的图标 → 按名字的既有链路
+        （磁盘缓存 → 离线包 → 内置预设 → 占位）。
+        前者是「匹配成功后持久化」的成果，换个名字也不会丢；
+        后者保证任何一个没匹配过的游戏也有图可画。
+        """
+        gid = self._safe_id(getattr(game, "id", ""))
+        if gid:
+            key = "g:" + gid
+            if key in self._pixmaps:
+                return self._pixmaps[key]
+            p = self._icon_path(getattr(game, "logo_file", ""))
+            if p:
+                pm = QPixmap(p)
+                if not pm.isNull():
+                    self._pixmaps[key] = pm
+                    return pm
+        return self.pixmap(getattr(game, "name", "") or "")
+
+    def has_game_icon(self, game) -> bool:
+        """这个游戏算不算「已经有图标」。
+
+        两条来源都算：匹配阶段落盘的，或用户装的离线包里本来就有。
+        后者不占额外空间，也没必要再联网下一份。
+        """
+        if self._icon_path(getattr(game, "logo_file", "")):
+            return True
+        return self.has_pack_logo(getattr(game, "name", "") or "")
+
+    def has_pack_logo(self, name: str) -> bool:
+        """名字能在离线包里命中、且图片文件确实存在。
+
+        只命中索引但文件缺失（包不完整）不算有图 —— 否则这款游戏
+        永远没机会联网取图。
+        """
+        appid = _pack_lookup(name)
+        if not appid:
+            return False
+        return any(os.path.isfile(os.path.join(d, "%s.png" % appid))
+                   for d in _pack_dirs())
+
+    def pack_name_zh(self, appid) -> str:
+        """按 appid 从离线包里反查中文名。
+
+        Steam 国区对不少游戏只返回英文名（官方没做中文本地化），
+        但社区通用译名在离线包的 names 里通常有一条。用它补，
+        比让这款游戏永远「缺中文名」要好。
+        """
+        _load_pack()
+        for n in _PACK.get(str(appid or ""), []):
+            n = (n or "").strip()
+            if n and has_cjk(n):
+                return n
+        return ""
+
+    def save_game_icon(self, game_id: str, pm: QPixmap) -> str:
+        """把规整好的图标写成 <game_id>.png，返回文件名（存库用）。
+
+        先写 .tmp 再原子替换：中途被 kill 也不会留下半张图，
+        否则下次启动读到损坏 PNG，QPixmap 为 null，图标变空白。
+        """
+        if pm is None or pm.isNull():
+            return ""
+        base = self._safe_id(game_id)
+        if not base:
+            return ""
+        name = base + ".png"
+        dst = os.path.join(self.icons_dir, name)
+        tmp = dst + ".tmp"
+        try:
+            os.makedirs(self.icons_dir, exist_ok=True)
+            if not pm.save(tmp, "PNG"):
+                return ""
+            os.replace(tmp, dst)
+        except Exception:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+            return ""
+        self._pixmaps["g:" + base] = pm
+        return name
+
+    def _icon_path(self, file_name: str):
+        """文件名 → 绝对路径。basename 兜一道，防止库里存了 ../ 之类。"""
+        base = os.path.basename(file_name or "")
+        if not base:
+            return None
+        p = os.path.join(self.icons_dir, base)
+        return p if os.path.isfile(p) else None
+
+    @staticmethod
+    def _safe_id(game_id: str) -> str:
+        """game_id 只留字母数字和 - _，防止拼路径时跑出图标目录。"""
+        return "".join(ch for ch in (game_id or "")
+                       if ch.isalnum() or ch in "-_")
+
+    def fetch_bytes(self, url: str):
+        """带一次重试的 GET，返回 bytes 或 None。工作线程可调。"""
+        return self._http(url)
+
+    def fetch_logo_image(self, appid):
+        """下图标原始字节并解码成 QImage。可在工作线程调用（QImage 是安全的）。
+
+        刻意不返回 QPixmap：QPixmap 只能在 GUI 线程创建。线程里只做
+        网络 IO 和解码，规整成 96px 圆角方块留给主线程。
+        """
+        for url in gamemeta.logo_urls(appid):
+            data = self._http(url)
+            if not data:
+                continue
+            img = QImage()
+            if img.loadFromData(data, "PNG") or img.loadFromData(data, "JPG"):
+                if not img.isNull():
+                    return img
+        return None
+
     def _load_pack_pixmap(self, name: str):
         """按名字从可选 logo 包里取图；没装包或包里没有都返回 None。"""
         appid = _pack_lookup(name)
@@ -339,136 +435,9 @@ class LogoService(QObject):
                 return pm
         return None
 
-    def request(self, name: str):
-        """请求联网图标。已缓存/包内已有/正在请求/已知失败的直接跳过。"""
-        key = _norm(name)
-        if not key or key in self._pending or key in self._failed:
-            return
-        if key in self._pixmaps:
-            return
-        appid = _pack_lookup(name)
-        if appid and any(os.path.isfile(os.path.join(d, "%s.png" % appid))
-                         for d in _pack_dirs()):
-            # 已安装的 logo 包里确实有这款的真实图片，没必要联网。
-            # 只命中索引但图片文件缺失（包不完整）时不能跳过，
-            # 否则这款游戏永远没机会联网取图。
-            # 不跳过的话，一次联网失败还会把 key 记进 _failed，
-            # 反而把「本来离线就有图」的状态搅乱。
-            return
-        self._pending.add(key)
-
-        def job(_sig):
-            # Worker.run() 会把 signals 作为第一个位置参数传进来，
-            # 这里用不到但必须收下，否则 TypeError。
-            try:
-                img = self._fetch_remote(name)
-            except Exception:
-                img = None
-            return key, name, img
-
-        from .workers import Worker
-        w = Worker(job)
-        w.signals.result.connect(self._on_fetched)
-
-        def _release(*_a):
-            with self._active_lock:
-                self._active.discard(w)
-
-        w.signals.result.connect(_release)
-        w.signals.error.connect(_release)
-        with self._active_lock:
-            self._active.add(w)
-        self._pool.start(w)
-
-    def _on_fetched(self, res):
-        key, name, img = res
-        self._pending.discard(key)
-        # 这里已经在 GUI 线程，才允许碰 QPixmap / QPainter。
-        pm = self._to_tile(img) if (img is not None and not img.isNull()) else None
-        if pm is None or pm.isNull():
-            self._failed.add(key)
-            return
-        self._pixmaps[key] = pm
-        self._save_disk(key, pm)
-        self.logo_ready.emit(name)
     # ==========================================================
-    # 联网检索
+    # 网络：取原始字节 / 解码成 QImage（均可在工作线程调用）
     # ==========================================================
-    def _fetch_remote(self, name: str):
-        """在工作线程里只取原始图片，返回 QImage（或 None）。
-
-        刻意不在这里转 QPixmap：QPixmap / QPainter 只能在 GUI 线程用，
-        在工作线程里画图属于未定义行为（离屏环境下可能「看起来正常」，
-        换个平台就崩）。所以线程只负责网络 IO 和解码，规整成图标
-        留给 _on_fetched 在主线程做。
-        """
-        appid = self._steam_appid(name)
-        if not appid:
-            return None
-        # logo.png 是透明底的游戏标志，最适合做小图标；取不到再用 header.jpg
-        for url in (
-            "https://cdn.akamai.steamstatic.com/steam/apps/%s/logo.png" % appid,
-            "https://cdn.akamai.steamstatic.com/steam/apps/%s/header.jpg" % appid,
-        ):
-            data = self._http(url)
-            if not data:
-                continue
-            img = QImage()
-            if img.loadFromData(data, "PNG") or img.loadFromData(data, "JPG"):
-                if not img.isNull():
-                    return img
-        return None
-
-    def _steam_appid(self, name: str):
-        """在 Steam 商店里搜这款游戏，返回 appid（不确定就返回 None）。
-
-        扫描器起的游戏名是「中文俗名 英文名」组合名
-        （如「荒野大镖客2 Red Dead Redemption 2」）。Steam 的搜索
-        只认官方名，把整个组合名丢进去**一个结果都没有**
-        （实测：term=荒野大镖客2 Red Dead Redemption 2 → 空；
-        单独搜 Red Dead Redemption 2 → 1174180）。
-        所以按候选词逐个试：英文部分优先，再全名，再中文部分。
-        """
-        for term in self._search_terms(name):
-            appid = self._search_one(term)
-            if appid:
-                return appid
-        return None
-
-    @staticmethod
-    def _search_terms(name: str):
-        """从游戏名生成搜索候选词，越可能命中的越靠前。"""
-        words = (name or "").split()
-        ascii_run = " ".join(w for w in words if w.isascii() and w.strip())
-        zh_run = "".join(w for w in words if not w.isascii() and w.strip())
-        terms = []
-        for t in (ascii_run, name, zh_run):
-            if t and t not in terms:
-                terms.append(t)
-        return terms
-
-    def _search_one(self, term: str):
-        """拿单个候选词搜一次 Steam，返回 appid 或 None。"""
-        url = ("https://store.steampowered.com/api/storesearch/"
-               "?term=%s&cc=cn&l=schinese" % urllib.parse.quote(term))
-        raw = self._http(url)
-        if not raw:
-            return None
-        try:
-            d = json.loads(raw.decode("utf-8", "replace"))
-        except Exception:
-            return None
-        best = None
-        for it in d.get("items", []):
-            if it.get("type") and it.get("type") != "app":
-                continue                      # 跳过 DLC / 原声带 / 捆绑包
-            cand = it.get("name") or ""
-            if _name_match(term, cand):
-                # 多个候选时取相似度最高的
-                if best is None or _similar(_norm(term), _norm(cand)) > best[0]:
-                    best = (_similar(_norm(term), _norm(cand)), it.get("id"))
-        return best[1] if best else None
-
     @staticmethod
     def _http(url: str, retries: int = 1):
         for i in range(retries + 1):
@@ -564,7 +533,8 @@ class LogoService(QObject):
     # 位图规整：任意来源的图都变成同样尺寸的圆角方块
     # ==========================================================
     @staticmethod
-    def _to_tile(img: QImage) -> QPixmap:
+    def to_tile(img: QImage) -> QPixmap:
+        """把任意来源的图规整成 96px 圆角方块。只能在 GUI 线程调用。"""
         if img.isNull():
             return None
         # 透明底的图（Steam logo.png）用 contain，保证标志不被裁；
@@ -601,9 +571,3 @@ class LogoService(QObject):
             return None
         pm = QPixmap(p)
         return pm if not pm.isNull() else None
-
-    def _save_disk(self, key: str, pm: QPixmap):
-        try:
-            pm.save(self._disk_path(key), "PNG")
-        except Exception:
-            pass

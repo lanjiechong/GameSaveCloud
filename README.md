@@ -3,9 +3,9 @@
 跨平台桌面端的游戏存档备份与同步工具，对标 UU 加速器「云存档」。
 核心承诺：**任何情况下不丢存档** —— 覆盖、回滚、冲突、删除，每一步之前都先留底。
 
-约 5600 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
+约 5800 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
 
-**当前版本 v1.1.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
+**当前版本 v1.2.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -68,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 66 个核心引擎单元测试
+python tests/test_core.py                                # 89 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -102,6 +102,7 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 | 4 | 冲突检测与三选一处理 | `gamesave/sync.py::_decide`，`ConflictDialog` |
 | 5 | 覆盖/恢复前自动本地留底 | `gamesave/vault.py::_backup_existing` → `localcopies/` |
 | 交互 | 图形界面展示状态/时间/占用 | `ui/main_window.py`（自绘列表 + 状态卡片），图标见 `ui/logos.py`、排版见 `ui/game_list.py` |
+| 交互 | **图标与中文名自动匹配** | `gamesave/gamemeta.py`（Steam 搜索 + 中文名解析 + 退避），`ui/metaservice.py`（后台批量调度），落库见 `vault.py::save_meta`（见 §10.3） |
 | 交互 | 危险操作二次确认 | `ConfirmDialog`（默认焦点在「取消」，回滚还需勾选确认框） |
 | 交互 | 定时自动备份 + 静默同步 | `ui/main_window.py::_build_timer` / `_on_tick`，`config.schedule` |
 | 交互 | 网络异常/冲突清晰提示 | 后台失败只记日志 + 置错误态；冲突中断同步并弹窗交人决策 |
@@ -117,7 +118,8 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 │  main_window.py           主窗口、队列式同步编排                │
 │  dialogs.py               确认 / 冲突 / 历史 / 差异 / 设置      │
 │  game_list.py             游戏列表自绘委托（图标+两行文字）      │
-│  logos.py                 图标逐级保障 + Steam 联网检索          │
+│  logos.py                 图标：落盘图 / 缓存 / 离线包 / 预设    │
+│  metaservice.py           后台批量匹配图标与中文名（3 并发）     │
 │  workers.py               QRunnable + QThreadPool，信号回传     │
 │  theme.py                配色与样式表                          │
 │  assets/                  仅应用自己的图标（PNG + 多尺寸 ICO）   │
@@ -143,6 +145,7 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 │  remote.py   RemoteBackend  ┬ LocalFolderBackend               │
 │                             └ WebDAVBackend（纯标准库）         │
 │  scanner.py                 存档目录发现                        │
+│  gamemeta.py                Steam 名字解析 / 中文名 / 退避策略   │
 │  models.py                  dataclass 数据模型                  │
 │  config.py                  跨平台配置（含云端总开关）           │
 └──────────────────────────┬────────────────────────────────────┘
@@ -315,6 +318,7 @@ remote/                                 云端（默认 %LOCALAPPDATA%/GameSaveC
 | `chunk_refs` | 快照 → chunk 的反查表，`gc()` 靠它算「谁还被引用」 |
 | `sync_state` | 每游戏的 base_snapshot_id / last_sync_at / last_error |
 | `local_copies` | 留底流水（游戏 / 原路径 / 备份路径 / 原因） |
+| `game_meta` | 图标与中文名（name_zh / appid / logo_file / state / attempts / next_retry_at） |
 
 ### 多存档目录的虚拟根
 
@@ -449,7 +453,7 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 ## 8. 测试
 
 ```bash
-python tests/test_core.py                  # 36 个单元测试
+python tests/test_core.py                  # 89 个单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 ```
 
@@ -468,6 +472,12 @@ QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 - 多目录虚拟根往返、陈旧序号前缀跳过
 - 无变化的同步不生成新快照
 - 快照保留策略：只留最近 N 份、保护同步基准、回收失去引用的 chunk
+- 重复快照合并：内容指纹相同即合并、同步基准受保护
+- 游戏元数据：Steam 搜索四分支（命中中文名 / 只有英文名 / 没搜到 / 网络错误）、
+  DLC 过滤、名字不像的候选被拒、中文名挑选
+- `game_meta` 的 patch 语义（只补图标不抹掉已存的中文名）、重启后仍能读到、
+  移除游戏时清理
+- 匹配调度：已完整的不再排队、失败按指数退避、退避到期自动重试
 
 `tests/smoke_gui.py` 在离屏模式下驱动真实 `MainWindow`，
 重点盯两个曾经真实发生过的故障：后台线程读 SQLite 抛异常、
@@ -557,20 +567,38 @@ CLI测试        1 文件 14 B
 `status()` / `plan()` 在该标志为 False 时**不调用任何远端原语**
 （单元测试用一个「一被调用就抛 AssertionError」的后端来守住这条边界）。
 
-### 10.3 游戏图标：逐级保障 + 商标合规
+### 10.3 图标与中文名：自动匹配 + 逐级保障
 
-左侧列表每款游戏都有一个图标，来源按优先级：
+左侧每款游戏都有图标和显示名，两者由同一套匹配流程补齐。
+
+**匹配时机**：扫描/添加游戏之后、每次点「刷新」之后。只处理
+「缺图标 **或** 缺中文名」的游戏 —— 已经齐了的一个网络请求都不发。
+匹配跑在独立线程池（3 并发），刷新先把列表渲染出来，结果逐个回填。
+
+**图标来源（按优先级）**：
 
 ```
-1. 磁盘缓存     %LOCALAPPDATA%/GameSaveCloud/logocache/<md5>.png
-                —— 第二次启动直接用，离线也有图
-2. 可选离线包   %LOCALAPPDATA%/GameSaveCloud/logopack/<appid>.png
+1. 匹配落盘     %LOCALAPPDATA%/GameSaveCloud/gameicons/<game_id>.png
+                —— 匹配成功后按 game_id 存，改名、换语言都不丢
+2. 磁盘缓存     %LOCALAPPDATA%/GameSaveCloud/logocache/<md5>.png
+                —— 早期按名字哈希的缓存，兼容旧数据
+3. 可选离线包   %LOCALAPPDATA%/GameSaveCloud/logopack/<appid>.png
                 —— 用户自行安装的离线 logo 包，默认不存在
-3. 内置预设     logos.py 的 BUILTIN 表，约 90 款热门游戏
+4. 内置预设     logos.py 的 BUILTIN 表，约 90 款热门游戏
                 （配色 + 短代号，离线立刻可画，断网也不会空白）
-4. 联网检索     以上都没命中再走 Steam 公开接口，见下
 5. 占位兜底     首字母色块，与真实图标同尺寸同圆角
 ```
+
+**中文名来源（按优先级）**：
+
+```
+1. Steam 国区商店名   storesearch?l=schinese 返回的本地化名
+2. 离线包社区译名     logo_pack.json 中该 appid 的 names 里挑含汉字的
+3. 原名              以上都没有就继续显示扫描时的名字，界面不受影响
+```
+
+匹配到的中文名进 `game_meta.name_zh`，列表主标题优先显示它，
+原名挂在 tooltip 上（对照存档目录时不会认错）。
 
 **商标合规**：游戏 logo 的版权归各游戏厂商所有，所以仓库和发布包
 **不再内置任何第三方 logo** —— 真实图标一律在运行时从 Steam 公共 CDN
@@ -581,14 +609,40 @@ spec 也不会把它打进 exe。想要离线即有真实图标，可把预取�
 `%LOCALAPPDATA%\GameSaveCloud\logopack\`（或开发时直接生成到
 `ui/assets/logos/`）。
 
-**为什么不能只靠联网检索**（实测踩出来的坑）：
+**匹配流程**（`gamesave/gamemeta.py` + `ui/metaservice.py`）：
+
+```
+刷新完成
+  └→ MetaService.ensure(games)           只挑缺图标 / 缺中文名的
+       └→ 独立线程池（3 并发）
+            ├→ gamemeta.lookup(name)       拆词搜 Steam，做名字校验
+            ├→ 下载 logo.png / header.jpg，解码成 QImage
+            └→ 回主线程：QImage → 96px 圆角方块 → 存 PNG → 写 game_meta
+                 └→ meta_ready(game) → 就地重绘那一行 + 更新右侧卡片
+```
+
+**匹配失败怎么办**：
+
+- 只写 `state` / `attempts` / `next_retry_at`，**不动游戏本身的任何字段** ——
+  列表照常显示原名与占位图标，不影响任何操作。
+- 失败退避：10 分钟 → 20 分钟 → 40 分钟 …… 封顶 7 天。避免每次刷新都往
+  Steam 打一遍注定失败的请求；退避到期后刷新会自动重试。
+- 「查到了但官方没中文名」（大量独立游戏国区只有英文名）记为 `ok`，
+  不算失败 —— 否则这类游戏会**永远**被判成「缺中文名」而无限重试。
+
+**为什么必须拆词搜**（实测踩出来的坑）：
 
 扫描器给游戏起的是「中文俗名 英文名」组合名（`荒野大镖客2 Red Dead Redemption 2`），
 而 Steam 搜索只认官方名 —— 整个组合名丢进 `storesearch` **一个结果都返回不了**
 （实测：`term=荒野大镖客2 Red Dead Redemption 2` → 空；
-单独搜 `Red Dead Redemption 2` → 1174180）。所以联网检索前会拆出英文部分
-优先搜（`_search_terms`）；热门游戏第一次启动联网取到图后即进缓存，
+单独搜 `Red Dead Redemption 2` → 1174180）。所以检索前会拆出英文部分
+优先搜（`gamemeta.search_terms`）；热门游戏第一次联网取到图后即落盘，
 离线包则为完全断网的机器提供可选补充。
+
+**两字中文标题曾经匹配不上**：「只狼」归一化后只有 2 个字符，被
+`len >= 3` 的包含判定挡在门外，导致 `只狼 Sekiro` 永远搜不到
+`只狼：影逝二度`。现在规则是「查询词是候选子串时，含汉字的两字词也算命中」——
+一个两字中文词的信息量远大于两个拉丁字母，不该用同一把尺子。
 
 **离线包的名字匹配**（`_pack_lookup`，四轮从严到宽，天然兼容组合名）：
 
@@ -601,7 +655,26 @@ spec 也不会把它打进 exe。想要离线即有真实图标，可把预取�
                                但「thewitcher3」作为包内名被第 2 轮收掉
 ```
 
-**联网那一层的来源与校验：**
+**跨语言怎么认亲**（这条踩得最深）：
+
+国区的 `storesearch` 直接返回本地化名，「查英文词、拿中文名」是常态：
+`Cyberpunk 2077` 返回 `赛博朋克 2077`。拿英文查询词和中文候选算字符串
+相似度必然是 0 —— 正确条目被排除，反而选中名字里恰好带查询词的 DLC
+（实测命中 `2060310 Cyberpunk 2077 REDmod`，不是本体 `1091500`；
+搜 `SplitFiction` 明明返回了「双影奇境」却一条都匹配不上）。
+
+现在的顺序是：
+
+1. 先看搜索结果**第一条**（Steam 的相关度排序基本可靠），名字能对上就用；
+2. 对不上且「查询是英文、候选是中文」时，问 `appdetails?l=english` 要官方
+   英文名再比一次（阈值 0.8；只对第一条发，不逐个候选打，避免触发限流）；
+3. 都不行才走宽松的名字匹配兜底。
+
+另两条配套规则：英文名靠分隔符接副标题（`Sekiro™: Shadows Die Twice`）
+算正常命名；靠空格硬接一截（`Cyberpunk 2077 REDmod`）判为不同产品。
+常见缩写（`GTA V` / `RDR2`）先展开成全名再搜，否则永远搜不到。
+
+**联网来源与校验：**
 
 ```
 ① https://store.steampowered.com/api/storesearch/?term=<游戏名>&cc=cn&l=schinese
@@ -614,17 +687,19 @@ spec 也不会把它打进 exe。想要离线即有真实图标，可把预取�
 所以加了一道 `difflib.SequenceMatcher` 相似度校验（相等 / 互相包含 / 相似度 ≥ 0.62）。
 判「不像」就当作没找到，回落到预设或占位 —— **错的 logo 比没有 logo 更误导人**。
 
-另外，联网检索前会先把组合名拆出英文部分优先搜（`_search_terms`）：
+另外，检索前会先把组合名拆出英文部分优先搜（`gamemeta.search_terms`）：
 `荒野大镖客2 Red Dead Redemption 2` → 先搜 `Red Dead Redemption 2`。
 
 三个容易踩的坑，代码里都有对应处理：
 
 - **`QPixmap` / `QPainter` 只能在 GUI 线程用。** 工作线程只做网络 IO 和
-  `QImage` 解码，规整成圆角方块这一步放回 `_on_fetched`（主线程）做。
+  `QImage` 解码；规整成圆角方块、写 PNG 都在主线程的
+  `MetaService._on_result` 里做。
 - **`hash(str)` 按进程随机化。** 占位色块的颜色索引用 `zlib.crc32`，
   保证同一款游戏每次启动都是同一个颜色。
 - **`QThreadPool.start()` 不持 Python 侧引用。** worker 若被 GC，
-  `logo_ready` 永远发不出来。`LogoService` 自己维护了一份强引用表。
+  `result` 信号永远发不出来，界面会一直卡在「匹配中 n/N」。
+  `MetaService` 自己维护了一份强引用表。
 
 **本机预取离线 logo 包**（可选，需要能访问 Steam 商店；产物不提交、不分发）：
 
@@ -670,6 +745,9 @@ N 个条目就是 N 套 layout，窗口缩放时全部重新布局，
 - exe 未做代码签名，首次运行可能被 SmartScreen 拦一下，
   点「更多信息 → 仍要运行」即可；下载后建议用 Release 页面的
   SHA256 核对文件完整性。
+- 图标与中文名匹配依赖 Steam 公开接口。离线时只有内置预设/占位图标，
+  中文名保持原名；联网后下次刷新会自动补上。名字对不上时宁可判
+  「没找到」，绝不显示张冠李戴的图标或译名。
 
 ---
 
@@ -690,6 +768,6 @@ Python 运行时为 PSF）的完整声明、动态链接合规说明与 Qt 可�
 **关于 AI 辅助开发的说明**：本项目在开发过程中使用了 AI 编程助手
 参与代码编写与问题排查。需求取舍、架构设计、安全模型（留底机制、
 三方合并基准、内容哈希判定等）与最终代码均由人类作者审阅、测试并负责；
-全部核心行为由 `tests/test_core.py` 的 60 个单元测试钉住。如发现任何
+全部核心行为由 `tests/test_core.py` 的 89 个单元测试钉住。如发现任何
 疑似侵权内容，请在 [Issues](https://github.com/lanjiechong/GameSaveCloud/issues)
 反馈，核实后立即处理。
