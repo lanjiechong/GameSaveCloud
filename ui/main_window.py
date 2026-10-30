@@ -33,11 +33,12 @@ from .theme import PALETTE, STYLESHEET, state_color, state_bg, state_label
 from . import msgbox
 from .dialogs import (ConfirmDialog, ConflictDialog, AddGameDialog,
                       HistoryDialog, DiffDialog, SettingsDialog, AboutDialog,
-                      _fmt, _human)
+                      PickPathDialog, RemovedGamesDialog, _fmt, _human)
 from .workers import run_async, OperationCancelled
 from .game_list import GameItemDelegate, ROLE_GAME, ROLE_STATUS, ROLE_CLOUD
 from .logos import LogoService
 from .metaservice import MetaService
+from gamesave import launcher, relocate
 from gamesave.config import Config
 from gamesave.vault import Vault
 from gamesave.remote import LocalFolderBackend, WebDAVBackend, RemoteError
@@ -155,6 +156,9 @@ class MainWindow(QMainWindow):
         self.b_sync.clicked.connect(self.sync_all)
         self.b_add = QPushButton("添加游戏")
         self.b_add.clicked.connect(self.add_game)
+        self.b_removed = QPushButton("已移除…")
+        self.b_removed.setToolTip("查看被移除的游戏并放回（快照一直保留）")
+        self.b_removed.clicked.connect(self.show_removed)
         self.b_settings = QPushButton("设置")
         self.b_settings.clicked.connect(self.open_settings)
         self.b_refresh = QPushButton("刷新")
@@ -164,8 +168,8 @@ class MainWindow(QMainWindow):
         self.b_stop.clicked.connect(self.cancel_current)
         self.b_about = QPushButton("关于")
         self.b_about.clicked.connect(self.open_about)
-        for b in (self.b_backup, self.b_sync, self.b_add, self.b_settings,
-                  self.b_refresh, self.b_stop, self.b_about):
+        for b in (self.b_backup, self.b_sync, self.b_add, self.b_removed,
+                  self.b_settings, self.b_refresh, self.b_stop, self.b_about):
             bar.addWidget(b)
         bar.addStretch(1)
         self.vault_info = QLabel()
@@ -255,7 +259,14 @@ class MainWindow(QMainWindow):
         self.b_sync_one.clicked.connect(self.sync_current)
         self.b_remove = QPushButton("移除游戏")
         self.b_remove.clicked.connect(self.remove_game)
-        for b in (self.b_history, self.b_files, self.b_sync_one, self.b_remove):
+        self.b_find = QPushButton("找回存档")
+        self.b_find.setToolTip("存档目录不存在时，自动按平台清单或同名目录重新定位")
+        self.b_find.clicked.connect(self.find_save_dir)
+        self.b_uninstall = QPushButton("卸载游戏")
+        self.b_uninstall.setToolTip("先备份一次，再交给 Steam / Epic 自己的卸载器")
+        self.b_uninstall.clicked.connect(self.uninstall_game)
+        for b in (self.b_history, self.b_files, self.b_sync_one,
+                  self.b_find, self.b_remove, self.b_uninstall):
             acts.addWidget(b)
         acts.addStretch(1)
         rl.addLayout(acts)
@@ -425,6 +436,18 @@ class MainWindow(QMainWindow):
                 break
         if not hit:
             return
+        # 匹配到 appid 之后才能从 Steam 清单里拿到安装根，补一次。
+        # 只在为空时补，不覆盖已有值（用户可能手动改过）。
+        try:
+            if not game.install_dir:
+                meta = self.vault.get_meta(game.id) or {}
+                info = launcher.find_install_dir(
+                    game.name, meta.get("appid") or "", game.platform)
+                if info.get("install_dir"):
+                    self.vault.set_install_dir(game.id, info["install_dir"])
+                    game.install_dir = info["install_dir"]
+        except Exception:
+            pass
         sel = self.current_game()
         if sel is not None and getattr(sel, "id", "") == game.id:
             self._refresh_detail(game)
@@ -492,7 +515,15 @@ class MainWindow(QMainWindow):
         self.lbl_size.setText("本地 %s · %s %s" % (_human(s.local_size), far,
                                                   _human(s.remote_size)))
         self.lbl_snaps.setText("快照 %d 个" % s.snapshot_count)
-        self.lbl_msg.setText(s.message or "")
+        msg = s.message or ""
+        # 存档目录不在 = 游戏被卸了 / 装到别的盘了。这时候点「备份」只会
+        # 生成一个 0 文件的空快照，点「回滚」以前还会往幽灵目录写，必须提示。
+        gone = [p for p in g.paths if not os.path.isdir(p)]
+        if gone:
+            msg = ("%s · %d 个存档目录不存在，点「找回存档」重新定位"
+                   % (msg, len(gone)) if msg else
+                   "%d 个存档目录不存在，点「找回存档」重新定位" % len(gone))
+        self.lbl_msg.setText(msg)
         if s.state == SYNC_CONFLICT:
             self.lbl_msg.setStyleSheet("color:%s; font-weight:600;" % PALETTE["conflict"])
         else:
@@ -523,7 +554,8 @@ class MainWindow(QMainWindow):
             # 新一轮任务开始，清掉上一轮可能残留的取消标记
             self._cancel_event.clear()
         for b in (self.b_backup, self.b_sync, self.b_add, self.b_refresh,
-                  self.b_history, self.b_files, self.b_sync_one, self.b_remove):
+                  self.b_history, self.b_files, self.b_sync_one, self.b_remove,
+                  self.b_find, self.b_uninstall):
             b.setEnabled(not on)
         self.b_stop.setEnabled(on)
         if on:
@@ -581,10 +613,27 @@ class MainWindow(QMainWindow):
         self._log("后台任务失败：%s" % e)
 
     # ---------- 立即备份 ----------
+    @staticmethod
+    def _all_roots_gone(g) -> bool:
+        """所有存档目录都不存在。
+
+        这种状态下备份只会产出一个 0 个文件的空快照。空快照本身没危害，
+        但会占掉「每款游戏保留最近 N 份」的配额，把真正有用的历史挤出去；
+        定时备份一小时一次，一天就能把 30 份配额冲干净。
+        游戏被卸载、或整个搬迁到别的盘时就是这状态 —— 直接跳过，
+        等「找回存档」处理完再备份。
+        """
+        return not any(os.path.isdir(p) for p in (g.paths or ()))
+
     def backup_current(self):
         g = self.current_game()
         if not g:
             msgbox.info(self, "未选择", "请先在左侧选择一个游戏。")
+            return
+        if self._all_roots_gone(g):
+            msgbox.warn(self, "存档目录不存在",
+                        "这款游戏的存档目录都不在了，备份只会得到一个空快照。\n\n"
+                        "如果只是换了安装位置，请先点「找回存档」定位新目录。")
             return
         self._set_busy(True, "正在备份 %s …" % g.name)
 
@@ -705,6 +754,10 @@ class MainWindow(QMainWindow):
                                         "所有游戏已备份到本地保险库。")
             return
         g = self._backup_queue.pop(0)
+        if self._all_roots_gone(g):
+            self._log("跳过 %s：存档目录不存在（找回存档后再备份）" % g.name)
+            self._backup_next()
+            return
 
         def job(sig):
             return self.vault.create_snapshot(
@@ -823,17 +876,30 @@ class MainWindow(QMainWindow):
 
     def _do_rollback(self, snap):
         g = self.current_game()
+        gone = relocate.missing_roots(g)
+        if gone:
+            # 目标目录都不在，还原只会把这些目录重新建出来。以前是静默的，
+            # 用户看到「还原成功」，游戏读的却是新路径，等于白还原。
+            if msgbox.ask(self, "存档目录不存在",
+                          "以下目录已不存在：\n\n%s\n\n"
+                          "现在还原会把它们重新建出来，游戏读不到。\n"
+                          "要先去「找回存档」定位新位置吗？" % "\n".join(gone),
+                          ok_text="去找回", cancel_text="仍然还原"):
+                self.find_save_dir()
+                return
         push = ("回滚后本地内容与该版本完全一致，随后同步会把此版本推送到云端。"
                 if self.cloud_on else
                 "当前为本地备份模式，回滚只影响本地目录与本地保险库。")
         detail = ("将把 %s 回滚到 %s 的快照：\n\n"
                   "  版本时间：%s\n"
                   "  文件数量：%d\n"
-                  "  总体积：%s\n\n"
+                  "  总体积：%s\n"
+                  "  写入目录：%s\n\n"
                   "当前存档目录里被覆盖的文件，会先自动复制到 "
                   "本地保险库的 localcopies/ 留底。\n%s"
                   % (g.name, _fmt(snap.created_at), _fmt(snap.created_at),
-                     len(snap.files), _human(snap.total_size), push))
+                     len(snap.files), _human(snap.total_size),
+                     " / ".join(g.paths), push))
         if self.cfg.safety.get("confirm_dangerous", True) and not ConfirmDialog.ask(
                 "回滚存档 —— %s" % g.name,
                 "此操作会用旧版本覆盖当前存档，属于不可逆操作。",
@@ -844,9 +910,19 @@ class MainWindow(QMainWindow):
         def job(sig):
             return self.vault.restore_snapshot(
                 g, snap.id, safety=self.cfg.safety["keep_local_copy"],
+                require_roots=True,
                 progress_cb=lambda c, t: self._task_progress(sig, "回滚", c, t))
 
         def done(st):
+            if st.get("missing_roots"):
+                self._log("回滚中止：目标目录不存在 —— %s"
+                          % " / ".join(st["missing_roots"]))
+                self._set_busy(False)
+                msgbox.warn(self, "没有写入",
+                            "存档目录不存在，已跳过全部文件（未创建任何目录）：\n\n%s\n\n"
+                            "请先点「找回存档」定位新位置。"
+                            % "\n".join(st["missing_roots"]))
+                return
             self._log("回滚完成：还原 %d 个文件，覆盖前留底 %d 个"
                       % (st["restored"], st["backed_up"]))
             self._prune(g)
@@ -911,7 +987,12 @@ class MainWindow(QMainWindow):
                 return
             picked = dlg.get_selected()
             for fg in picked:
-                g = self.vault.add_game(fg.name, fg.paths, platform=fg.platform)
+                # 顺手记下安装根。现在只是多读两个清单文件，但存档一旦落在
+                # 安装目录里，卸载重装后「找回存档」就靠它换算新位置。
+                g = self.vault.add_game(
+                    fg.name, fg.paths, platform=fg.platform,
+                    install_dir=launcher.find_install_dir(
+                        fg.name, platform=fg.platform).get("install_dir", ""))
                 self._log("已添加游戏：%s（%s）" % (g.name, " / ".join(g.paths)))
             self.refresh_all()
 
@@ -922,16 +1003,157 @@ class MainWindow(QMainWindow):
         g = self.current_game()
         if not g:
             return
+        snaps = self.vault.list_snapshots(g.id)
         if self.cfg.safety.get("confirm_dangerous", True) and not ConfirmDialog.ask(
                 "移除游戏 —— %s" % g.name,
-                "将从列表移除该游戏，已备份的快照与 chunk 会保留在保险库中。",
-                "游戏：%s\n路径：%s\n\n这不会删除任何已备份的数据，"
-                "之后可以重新添加。" % (g.name, "\n".join(g.paths)),
+                "从列表移除，快照全部保留，随时可以放回来。",
+                "游戏：%s\n路径：%s\n\n快照 %d 个，不会删除任何备份数据。\n"
+                "移除后可以在工具栏「已移除…」里放回，历史版本原样可见。"
+                % (g.name, "\n".join(g.paths), len(snaps)),
                 parent=self):
             return
         self.vault.remove_game(g.id, keep_snapshots=True)
-        self._log("已移除游戏：%s" % g.name)
+        self._log("已移除游戏：%s（快照保留，可从「已移除…」放回）" % g.name)
         self.refresh_all()
+
+    def show_removed(self):
+        games = self.vault.list_removed()
+        if not games:
+            msgbox.info(self, "没有已移除的游戏", "当前列表里的游戏都没有被移除过。")
+            return
+        dlg = RemovedGamesDialog(games, self)
+        if dlg.exec() != RemovedGamesDialog.Accepted:
+            return
+        for gid in dlg.picked:
+            self.vault.restore_removed(gid)
+        self._log("已放回 %d 款游戏" % len(dlg.picked))
+        self.refresh_all()
+
+    # ==========================================================
+    # 路径找回
+    # ==========================================================
+    def find_save_dir(self):
+        g = self.current_game()
+        if not g:
+            return
+        d = relocate.diagnose(g, self.vault)
+        if d["state"] == "ok":
+            msgbox.info(self, "路径正常",
+                        "存档目录都在，不需要找回：\n\n%s" % "\n".join(g.paths))
+            return
+        if d["state"] == "lost":
+            if not msgbox.ask(self, "没找到", "%s\n\n要手动指定一个目录吗？" % d["note"]):
+                return
+            dlg = PickPathDialog("指定存档目录 —— %s" % g.name, [],
+                                 "没找到候选目录，请手动选择这款游戏存档所在的文件夹。", self)
+            if dlg.exec() != PickPathDialog.Accepted:
+                return
+            self._apply_relocation(g, [dlg.result_path], d["install_dir"])
+            return
+        if d["state"] == "candidates":
+            dlg = PickPathDialog("找到疑似目录 —— %s" % g.name, d["candidates"],
+                                 "这些目录里存在与快照同名的文件，请确认哪个才是它的存档。", self)
+            if dlg.exec() != PickPathDialog.Accepted:
+                return
+            self._apply_relocation(g, [dlg.result_path], d["install_dir"])
+            return
+        # state == relocate：平台清单直接算出了新位置，高置信，直接用。
+        # 但要把「写到哪」明确告诉用户，不能默默改完就完事。
+        lines = []
+        for old, new in zip(g.paths, d["paths"]):
+            lines.append("%s\n  → %s" % (old, new) if old != new else new)
+        if not ConfirmDialog.ask(
+                "已定位到新位置 —— %s" % g.name,
+                d["note"],
+                "存档路径将更新为：\n\n%s\n\n快照会原样接到新路径上，"
+                "历史版本一个都不会丢。" % "\n\n".join(lines),
+                parent=self):
+            return
+        self._apply_relocation(g, d["paths"], d["install_dir"])
+
+    def _apply_relocation(self, g, paths, install_dir):
+        relocate.apply(self.vault, g, paths, install_dir)
+        self._log("已重新定位 %s → %s" % (g.name, " / ".join(paths)))
+        self.refresh_all()
+
+    # ==========================================================
+    # 卸载
+    # ==========================================================
+    def uninstall_game(self):
+        g = self.current_game()
+        if not g:
+            return
+        meta = self.vault.get_meta(g.id) or {}
+        appid = meta.get("appid") or ""
+        info = launcher.find_install_dir(g.name, appid, g.platform)
+        if not info:
+            msgbox.warn(self, "找不到安装目录",
+                        "无法确定 %s 装在哪里，可能不是 Steam/Epic 版本，"
+                        "或者已经卸载了。\n\n可以手动在文件管理器里卸载，"
+                        "存档备份不受影响。" % g.name)
+            return
+        act = launcher.uninstall_action(info.get("install_dir", ""), appid,
+                                        info.get("app_name", ""))
+        if act["method"] == "none":
+            msgbox.warn(self, "无法卸载", act["label"])
+            return
+        if self.cfg.safety.get("confirm_dangerous", True) and not ConfirmDialog.ask(
+                "卸载游戏 —— %s" % g.name,
+                "会先备份一次存档，再交给 %s。" % act["label"],
+                "安装目录：%s\n\n"
+                "执行方式：%s\n\n"
+                "⚠ 存档备份会先做完再动手 —— 有些游戏把存档放在安装目录里，"
+                "平台卸载时会连存档一起删掉，那次备份是唯一的保命绳。\n"
+                "卸载完成后，这款游戏会标记为「已卸载」，快照与历史版本全部保留。"
+                % (info.get("install_dir", ""), act["label"]),
+                parent=self):
+            return
+        self._set_busy(True, "正在备份存档…")
+
+        def job(sig):
+            # 卸载前强制备份，不给关。返回快照文件数供日志用。
+            snap = self.vault.create_snapshot(g, kind="manual",
+                                              note="卸载前自动备份")
+            return snap
+
+        def done(snap):
+            self._set_busy(False)
+            self._log("卸载前已备份：%d 个文件 / %s"
+                      % (len(snap.files), _human(snap.total_size)))
+            try:
+                self._run_uninstall(act)
+            except Exception as e:
+                self._err(e)
+                return
+            self.vault.mark_uninstalled(g.id)
+            self._log("已发起卸载（%s），游戏标记为已卸载" % act["label"])
+            self.refresh_all()
+
+        run_async(job, on_result=done, on_error=lambda e: self._op_error(e))
+
+    @staticmethod
+    def _run_uninstall(act):
+        """真正执行卸载动作。
+
+        只做三件事之一：唤起平台协议、跑游戏自带卸载器、打开目录。
+        任何情况下都不自己删文件 —— 删什么由平台或厂商的卸载程序决定。
+        """
+        method, target = act["method"], act["target"]
+        if method in ("steam", "epic"):
+            if hasattr(os, "startfile"):
+                os.startfile(target)          # noqa: S606 - 协议地址，非可执行文件
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", target])
+        elif method == "uninstaller":
+            import subprocess
+            subprocess.Popen([target])
+        elif method == "open":
+            if hasattr(os, "startfile"):
+                os.startfile(target)
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", target])
 
     # ---------- 设置 ----------
     def open_about(self):

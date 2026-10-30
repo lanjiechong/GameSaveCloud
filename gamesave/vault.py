@@ -32,7 +32,9 @@ from .store import ChunkStore
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games(
   id TEXT PRIMARY KEY, name TEXT, paths TEXT, platform TEXT,
-  auto_scan INTEGER, created_at REAL, note TEXT);
+  auto_scan INTEGER, created_at REAL, note TEXT,
+  install_dir TEXT DEFAULT '', removed_at REAL DEFAULT 0,
+  uninstalled_at REAL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS snapshots(
   id TEXT PRIMARY KEY, game_id TEXT, created_at REAL, kind TEXT,
   total_size INTEGER, note TEXT);
@@ -149,7 +151,28 @@ class Vault:
         conn.execute("PRAGMA busy_timeout=5000")
         self.db = _LockedDB(conn)
         self.db.executescript(SCHEMA)
+        self._migrate()
         self.db.commit()
+
+    def _migrate(self):
+        """给老库补列。CREATE TABLE IF NOT EXISTS 不会给已存在的表加字段，
+        所以升级必须显式 ALTER —— 否则老用户升级后 SELECT * 出来的行
+        缺列，构造 Game 时直接 TypeError。
+        """
+        want = {"install_dir": "TEXT DEFAULT ''",
+                "removed_at": "REAL DEFAULT 0",
+                "uninstalled_at": "REAL DEFAULT 0"}
+        try:
+            cols = {r["name"] for r in self.db.execute("PRAGMA table_info(games)")}
+        except Exception:
+            return
+        for name, decl in want.items():
+            if name not in cols:
+                try:
+                    self.db.execute("ALTER TABLE games ADD COLUMN %s %s"
+                                    % (name, decl))
+                except Exception:
+                    pass
 
     def close(self):
         try:
@@ -160,49 +183,160 @@ class Vault:
     # ==========================================================
     # 游戏管理
     # ==========================================================
-    def add_game(self, name: str, paths, platform: str = "", note: str = "") -> Game:
+    def add_game(self, name: str, paths, platform: str = "", note: str = "",
+                 install_dir: str = "") -> Game:
+        """新增游戏。同名且「已移除」的旧记录会被复用，不新建。
+
+        复用 id 是这次改动的核心：`new_id()` 用时间戳做种子，每次添加都是
+        全新 id，而快照全部挂在 id 上 —— 一旦新建，历史快照就再也没人
+        认领了（数据还在磁盘，界面永远看不到）。卸载重装、改了存档路径
+        之后重新添加，靠的就是这条复用把历史接回来。
+        """
         paths = [os.path.abspath(p) for p in paths]
+        old = self.find_by_name(name, only_removed=True)
+        if old is not None:
+            # 保留仍然存在的旧目录，避免「原本两个存档目录，这次只扫到一个」
+            # 的场景下把另一个活着的目录丢掉。
+            merged = list(paths)
+            for p in old.paths:
+                if p not in merged and os.path.isdir(p):
+                    merged.append(p)
+            old.paths = merged
+            old.platform = platform or old.platform
+            old.install_dir = install_dir or old.install_dir
+            old.removed_at = 0.0
+            old.uninstalled_at = 0.0
+            if note:
+                old.note = note
+            self.save_game(old)
+            return old
+
         g = Game(id=new_id("game|" + name), name=name, paths=paths,
-                 platform=platform, note=note, created_at=time.time())
+                 platform=platform, note=note, created_at=time.time(),
+                 install_dir=install_dir)
         self.save_game(g)
         return g
 
+    def find_by_name(self, name: str, only_removed: bool = False):
+        """按名字找已有游戏。名字比对用归一化（去空格/标点/大小写），
+        扫描器和手工添加对同一款游戏给出的名字常有细微差异。
+
+        only_removed=True 时只找已移除的，且取最近移除的那条。
+        """
+        from .gamemeta import norm_name
+        q = norm_name(name or "")
+        if not q:
+            return None
+        rows = self.db.execute("SELECT * FROM games")
+        best = None
+        for r in rows:
+            if norm_name(r["name"]) != q:
+                continue
+            g = self._game_from_row(r)
+            if only_removed and not g.is_removed:
+                continue
+            if best is None or g.removed_at > best.removed_at:
+                best = g
+        return best
+
     def save_game(self, g: Game):
         self.db.execute(
-            "INSERT OR REPLACE INTO games(id,name,paths,platform,auto_scan,created_at,note)"
-            " VALUES(?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO games(id,name,paths,platform,auto_scan,"
+            "created_at,note,install_dir,removed_at,uninstalled_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
             (g.id, g.name, json.dumps(g.paths, ensure_ascii=False), g.platform,
-             int(g.auto_scan), g.created_at, g.note))
+             int(g.auto_scan), g.created_at, g.note, g.install_dir or "",
+             float(g.removed_at or 0.0), float(g.uninstalled_at or 0.0)))
         self.db.commit()
 
-    def remove_game(self, game_id: str, keep_snapshots: bool = True):
+    def remove_game(self, game_id: str, keep_snapshots: bool = True,
+                    soft: bool = True):
+        """移除游戏。默认软删除：只打 removed_at 标记，id 和快照全留。
+
+        hard=True 才真的删记录（连带 game_meta）。即便硬删，快照也默认
+        保留 —— 删档是不可逆操作，不能顺手做掉。
+        """
+        if soft:
+            self.db.execute("UPDATE games SET removed_at=? WHERE id=?",
+                            (time.time(), game_id))
+            self.db.commit()
+            return
         self.db.execute("DELETE FROM games WHERE id=?", (game_id,))
-        # 元数据跟着走：重新添加会生成新的 game_id，旧行留着只是垃圾。
         self.db.execute("DELETE FROM game_meta WHERE game_id=?", (game_id,))
         if not keep_snapshots:
             for s in self.list_snapshots(game_id):
                 self.delete_snapshot(s.id)
         self.db.commit()
 
+    def restore_removed(self, game_id: str) -> bool:
+        """把已移除的游戏放回列表。快照本来就还在，改个标记就够。"""
+        r = self.db.execute_one("SELECT removed_at FROM games WHERE id=?",
+                                (game_id,))
+        if not r:
+            return False
+        self.db.execute("UPDATE games SET removed_at=0 WHERE id=?", (game_id,))
+        self.db.commit()
+        return True
+
+    def set_install_dir(self, game_id: str, install_dir: str):
+        self.db.execute("UPDATE games SET install_dir=? WHERE id=?",
+                        (install_dir or "", game_id))
+        self.db.commit()
+
+    def update_paths(self, game_id: str, paths, install_dir: str = None):
+        """改存档路径（重新定位后调用）。id 不变，快照自然全部接上。"""
+        paths = [os.path.abspath(p) for p in paths]
+        if install_dir is None:
+            self.db.execute("UPDATE games SET paths=? WHERE id=?",
+                            (json.dumps(paths, ensure_ascii=False), game_id))
+        else:
+            self.db.execute(
+                "UPDATE games SET paths=?, install_dir=? WHERE id=?",
+                (json.dumps(paths, ensure_ascii=False), install_dir or "",
+                 game_id))
+        self.db.commit()
+
+    def mark_uninstalled(self, game_id: str):
+        self.db.execute("UPDATE games SET uninstalled_at=? WHERE id=?",
+                        (time.time(), game_id))
+        self.db.commit()
+
+    def clear_uninstalled(self, game_id: str):
+        self.db.execute("UPDATE games SET uninstalled_at=0 WHERE id=?",
+                        (game_id,))
+        self.db.commit()
+
+    @staticmethod
+    def _game_from_row(r) -> Game:
+        keys = r.keys()
+        return Game(
+            id=r["id"], name=r["name"], paths=json.loads(r["paths"]),
+            platform=r["platform"], auto_scan=bool(r["auto_scan"]),
+            created_at=r["created_at"], note=r["note"],
+            install_dir=(r["install_dir"] if "install_dir" in keys else "") or "",
+            removed_at=(r["removed_at"] if "removed_at" in keys else 0.0) or 0.0,
+            uninstalled_at=(r["uninstalled_at"] if "uninstalled_at" in keys
+                            else 0.0) or 0.0)
+
     def get_game(self, game_id: str) -> Game:
         r = self.db.execute_one("SELECT * FROM games WHERE id=?", (game_id,))
         if not r:
             raise KeyError("游戏不存在: %s" % game_id)
-        g = Game(id=r["id"], name=r["name"], paths=json.loads(r["paths"]),
-                 platform=r["platform"], auto_scan=bool(r["auto_scan"]),
-                 created_at=r["created_at"], note=r["note"])
-        return self._apply_meta(g, self.get_meta(game_id))
+        return self._apply_meta(self._game_from_row(r), self.get_meta(game_id))
 
-    def list_games(self) -> list:
+    def list_games(self, include_removed: bool = False) -> list:
         # 元数据一次全取再按 id 映射，避免每款游戏各查一次（N+1）。
         metas = self.list_meta()
         out = []
         for r in self.db.execute("SELECT * FROM games ORDER BY name"):
-            g = Game(id=r["id"], name=r["name"], paths=json.loads(r["paths"]),
-                     platform=r["platform"], auto_scan=bool(r["auto_scan"]),
-                     created_at=r["created_at"], note=r["note"])
+            g = self._game_from_row(r)
+            if g.is_removed and not include_removed:
+                continue
             out.append(self._apply_meta(g, metas.get(g.id)))
         return out
+
+    def list_removed(self) -> list:
+        return [g for g in self.list_games(include_removed=True) if g.is_removed]
 
     @staticmethod
     def _apply_meta(g: Game, m) -> Game:
@@ -479,19 +613,26 @@ class Vault:
     # 还原（覆盖前自动留底）
     # ==========================================================
     def restore_snapshot(self, game: Game, sid: str, safety: bool = True,
-                         progress_cb=None, only_paths=None) -> dict:
+                         progress_cb=None, only_paths=None,
+                         require_roots: bool = False) -> dict:
         """把快照还原到游戏目录。
 
         safety=True 时，每个将被覆盖/删除的现有文件先复制到 localcopies/ 留底。
         only_paths 给定则只还原这些相对路径（用于单文件回滚）。
-        返回 {"restored": n, "backed_up": n, "skipped": n, "bytes": b}
+        require_roots=True 时，目标根目录不存在就跳过该根下的所有文件，
+        不再 os.makedirs 把「幽灵目录」建出来。卸载游戏后忘了改路径时，
+        旧行为会静默把存档写回一个已经不存在的位置，界面还报成功 ——
+        游戏实际读新路径，等于白还原。界面层一律传 True。
+
+        返回 {"restored","backed_up","skipped","bytes","missing_roots"}
         """
         snap = self.get_snapshot(sid)
         targets = {e.path: e for e in snap.files}
         if only_paths:
             targets = {p: targets[p] for p in only_paths if p in targets}
 
-        stats = {"restored": 0, "backed_up": 0, "skipped": 0, "bytes": 0}
+        stats = {"restored": 0, "backed_up": 0, "skipped": 0, "bytes": 0,
+                 "missing_roots": []}
         total = max(len(targets), 1)
         done = 0
 
@@ -499,6 +640,13 @@ class Vault:
         roots = self._roots_for(game, snap)
 
         for rel, e in targets.items():
+            if require_roots:
+                root = self._root_of(roots, rel)
+                if not root or not os.path.isdir(root):
+                    stats["skipped"] += 1
+                    if root and root not in stats["missing_roots"]:
+                        stats["missing_roots"].append(root)
+                    continue
             dst = self._resolve_target(roots, rel)
             if dst is None:
                 stats["skipped"] += 1
@@ -528,6 +676,18 @@ class Vault:
         if len(roots) == 1:
             return [roots[0]]
         return roots
+
+    @staticmethod
+    def _root_of(roots: list, rel: str) -> str:
+        """某条相对路径归属于哪个根目录（不校验路径安全性，仅取根）。"""
+        if not roots:
+            return ""
+        if len(roots) == 1:
+            return roots[0]
+        head = (rel or "").split("/", 1)[0]
+        if head.isdigit() and int(head) < len(roots):
+            return roots[int(head)]
+        return ""
 
     def _resolve_target(self, roots: list, rel: str):
         """虚拟根路径解析。陈旧的序号前缀（超出当前目录数）返回 None 跳过；

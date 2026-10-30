@@ -54,12 +54,14 @@ def main():
     app = QApplication(sys.argv)
 
     # 无头环境下模态框会永久霸占事件循环（用户没得点它），
-    # 把提示框的四个入口换成「记一笔就返回」，只验证代码路径走得通。
+    # 把提示框的入口换成「记一笔就返回」，只验证代码路径走得通。
+    # ask 打桩成「点确定」，否则询问框会挂住。
     from ui import msgbox
     shown_modals = []
     for _name in ("info", "warn", "error", "done"):
         setattr(msgbox, _name,
                 lambda *a, _n=_name, **k: shown_modals.append(_n))
+    msgbox.ask = lambda *a, **k: (shown_modals.append("ask"), True)[1]
 
     w = MainWindow()
     w._shown_modals = shown_modals
@@ -345,6 +347,96 @@ def main():
           "%d -> %d -> %d" % (n0, n1, n2))
     check("备份完成用的是静音提示框（已打桩）",
           "done" in shown_modals, "modals=%r" % (shown_modals[-4:],))
+
+    # --- [10] 卸载 / 软删除 / 路径找回 ---
+    print()
+    print("[10] 卸载、软删除、路径找回")
+
+    from ui.dialogs import ConfirmDialog
+    from gamesave import launcher as _L
+    from ui.game_list import ROLE_GAME
+
+    # 全程不弹真对话框：确认框直接当作「继续」
+    ConfirmDialog.ask = staticmethod(lambda *a, **k: True)
+
+    def select_game(gid):
+        for i in range(w.game_list.count()):
+            gg = w.game_list.item(i).data(ROLE_GAME)
+            if gg is not None and gg.id == gid:
+                w.game_list.setCurrentRow(i)
+                return True
+        return False
+
+    # --- 软删除 ---
+    sd_dir = os.path.join(TMP, "softgame", "saves")
+    os.makedirs(sd_dir)
+    with open(os.path.join(sd_dir, "x.sav"), "wb") as f:
+        f.write(b"v1")
+    sg = w.vault.add_game("SoftGame", [sd_dir])
+    w.vault.create_snapshot(sg)
+    w.vault.remove_game(sg.id)
+    check("移除是软删除：列表里看不到",
+          sg.id not in [x.id for x in w.vault.list_games()])
+    check("移除后快照仍在", len(w.vault.list_snapshots(sg.id)) == 1)
+    # 不先 restore_removed：这里要验证的正是「移除状态下重新添加能认回 id」
+    again = w.vault.add_game("SoftGame", [sd_dir])
+    check("重新添加复用同一个 id", again.id == sg.id,
+          "%s vs %s" % (again.id, sg.id))
+    check("重新添加后历史还在", len(w.vault.list_snapshots(again.id)) == 1)
+    check("重新添加后移除标记已清", not again.is_removed)
+
+    # --- 路径找回：存档在安装目录里，游戏装到了新位置 ---
+    old_install = os.path.join(TMP, "lib", "steamapps", "common", "Mover")
+    old_saves = os.path.join(old_install, "saves")
+    os.makedirs(old_saves)
+    with open(os.path.join(old_saves, "m.sav"), "wb") as f:
+        f.write(b"mover-v1")
+    mg = w.vault.add_game("MoverGame", [old_saves], install_dir=old_install)
+    w.vault.create_snapshot(mg)
+    new_install = os.path.join(TMP, "lib2", "steamapps", "common", "Mover")
+    new_saves = os.path.join(new_install, "saves")
+    os.makedirs(new_saves)
+    shutil.rmtree(old_install)
+    w.refresh_all()
+    pump(ms=1500, rounds=4)
+
+    orig_find = _L.find_install_dir
+    orig_action = _L.uninstall_action
+    _L.find_install_dir = lambda *a, **k: {
+        "install_dir": new_install, "source": "steam", "confidence": "high",
+        "installed": True, "installdir": "Mover"}
+    # 卸载动作也打桩：真机上这一步要靠 Steam 清单里确实有这个 appid，
+    # 冒烟环境里没有，不打桩会降级成「打开安装目录」
+    _L.uninstall_action = lambda *a, **k: {
+        "method": "steam", "target": "steam://uninstall/0", "label": "由 Steam 卸载"}
+    try:
+        ok_sel = select_game(mg.id)
+        before_snaps = len(w.vault.list_snapshots(mg.id))
+        w.find_save_dir()
+        pump(ms=1200, rounds=3)
+        moved = w.vault.get_game(mg.id)
+        check("按清单定位到新存档目录",
+              [os.path.normpath(p) for p in moved.paths] ==
+              [os.path.normpath(new_saves)],
+              "%r" % (moved.paths,))
+        check("重新定位后历史快照还在",
+              len(w.vault.list_snapshots(mg.id)) == before_snaps)
+        # --- 卸载 ---
+        calls = []
+        # 换成记录器，绝不真的去唤起 Steam 协议
+        w._run_uninstall = lambda act: calls.append(act["method"])
+        select_game(mg.id)
+        before_un = len(w.vault.list_snapshots(mg.id))
+        w.uninstall_game()
+        pump(ms=1800, rounds=5)
+        check("卸载前强制备份了一次",
+              len(w.vault.list_snapshots(mg.id)) == before_un + 1,
+              "%d -> %d" % (before_un, len(w.vault.list_snapshots(mg.id))))
+        check("卸载走平台协议而不是自己删文件", calls == ["steam"], repr(calls))
+        check("卸载后标记为已卸载", w.vault.get_game(mg.id).is_uninstalled)
+    finally:
+        _L.find_install_dir = orig_find
+        _L.uninstall_action = orig_action
 
     # --- 汇总 ---
     print()

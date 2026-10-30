@@ -9,13 +9,29 @@ from typing import List, Optional
 # ---------- 游戏 ----------
 @dataclass
 class Game:
-    id: str                      # 稳定标识（路径的短哈希）
+    id: str                      # 稳定标识，一旦生成永不改变（卸载/移除/找回都不换）
     name: str                    # 扫描/添加时的名字，是游戏的稳定标识，不随匹配改变
     paths: List[str]             # 存档目录，可多个
     platform: str = ""           # Steam / Epic / 独立 ...（仅作展示）
     auto_scan: bool = True       # 是否参与定时自动备份
     created_at: float = 0.0
     note: str = ""
+
+    # ---- 安装位置与生命周期（v1.4.0 起）----
+    # install_dir 是「安装根」，与日志里的存档目录不是一回事：存档多数在
+    # AppData/文档下，安装根只用于两件事 —— 判断存档是否落在游戏目录内
+    # （卸载会连存档一起删），以及安装了新位置时把存档路径换算过去。
+    install_dir: str = ""
+    removed_at: float = 0.0      # >0 表示已从列表移除（软删除，快照全留）
+    uninstalled_at: float = 0.0  # >0 表示已卸载（游戏没了，存档可能还在）
+
+    @property
+    def is_removed(self) -> bool:
+        return self.removed_at > 0
+
+    @property
+    def is_uninstalled(self) -> bool:
+        return self.uninstalled_at > 0
 
     # ---- 元数据（来自 game_meta 表，由 gamemeta 匹配后回填）----
     # 这三个字段不参与 add_game/save_game：它们存在独立的表里，

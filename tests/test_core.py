@@ -20,6 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 import json
 import urllib.parse
 
@@ -28,6 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gamesave import chunker
 from gamesave import gamemeta
 from gamesave import gameindex
+from gamesave import launcher
+from gamesave import relocate
 from gamesave.chunker import CHUNK_SIZE
 from gamesave.models import (Game, Snapshot, FileEntry, ChunkRef,
                              RESOLVE_KEEP_LOCAL, RESOLVE_USE_REMOTE,
@@ -1074,9 +1077,23 @@ class TestMetaStorage(unittest.TestCase):
         self.vault.save_meta(self.game.id, name_zh="测试游戏")
         self.assertEqual(self.vault.get_game(self.game.id).name_zh, "测试游戏")
 
-    def test_remove_game_clears_meta(self):
+    def test_remove_game_keeps_meta(self):
+        """软删除必须保留元数据。
+
+        旧行为是「移除即删 game_meta」，理由是「重新添加会生成新 id，
+        旧行是垃圾」。现在 id 会被复用（见 add_game），删掉就等于让用户
+        重装后再匹配一遍图标和中文名，白等一轮网络请求。
+        """
         self.vault.save_meta(self.game.id, name_zh="测试游戏")
         self.vault.remove_game(self.game.id)
+        m = self.vault.get_meta(self.game.id)
+        self.assertIsNotNone(m)
+        self.assertEqual(m["name_zh"], "测试游戏")
+
+    def test_hard_remove_clears_meta(self):
+        """硬删才清元数据 —— 那是真的不要了。"""
+        self.vault.save_meta(self.game.id, name_zh="测试游戏")
+        self.vault.remove_game(self.game.id, soft=False)
         self.assertIsNone(self.vault.get_meta(self.game.id))
 
     def test_meta_survives_reopen(self):
@@ -1377,6 +1394,310 @@ class TestPathHints(unittest.TestCase):
         for i in range(8):
             os.makedirs(os.path.join(root, "Game%d" % i))
         self.assertLessEqual(len(gamemeta.path_hints([root], limit=3)), 3)
+
+
+# ==================================================================
+# 17. 平台清单：Steam / Epic 安装根定位与路径换算
+# ==================================================================
+class TestLauncherPaths(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gsc_launch_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fake_library(self, appid, installdir, flags=4):
+        lib = os.path.join(self.tmp, "steamapps")
+        os.makedirs(os.path.join(lib, "common", installdir), exist_ok=True)
+        with open(os.path.join(lib, "appmanifest_%s.acf" % appid),
+                  "w", encoding="utf-8") as f:
+            f.write('"AppState"\n{\n'
+                    '\t"appid"\t\t"%s"\n'
+                    '\t"name"\t\t"%s"\n'
+                    '\t"StateFlags"\t\t"%d"\n'
+                    '\t"installdir"\t\t"%s"\n'
+                    '}\n' % (appid, installdir, flags, installdir))
+        return lib
+
+    def test_steam_app_reads_acf(self):
+        lib = self._fake_library("2001120", "Split Fiction")
+        with mock.patch.object(launcher, "steam_libraries", return_value=[lib]):
+            hit = launcher.steam_app("2001120")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["installdir"], "Split Fiction")
+        self.assertTrue(hit["install_dir"].endswith(
+            os.path.join("steamapps", "common", "Split Fiction")))
+        self.assertTrue(hit["installed"])
+
+    def test_steam_app_not_installed_flag(self):
+        """StateFlags 不带 4 说明没装完，不能当作可卸载/可定位。"""
+        lib = self._fake_library("777", "SomeGame", flags=2)
+        with mock.patch.object(launcher, "steam_libraries", return_value=[lib]):
+            hit = launcher.steam_app("777")
+        self.assertIsNotNone(hit)
+        self.assertFalse(hit["installed"])
+
+    def test_steam_app_id_not_numeric(self):
+        self.assertIsNone(launcher.steam_app(""))
+        self.assertIsNone(launcher.steam_app("abc"))
+
+    def test_steam_libraries_dedup_by_normcase(self):
+        """注册表给 c:/steam、vdf 给 C:\\steam，是同一个库，不能算两条。"""
+        lib = os.path.join(self.tmp, "steamapps")
+        os.makedirs(lib, exist_ok=True)
+        with open(os.path.join(lib, "libraryfolders.vdf"), "w",
+                  encoding="utf-8") as f:
+            f.write('"libraryfolders"\n{\n\t"0"\n\t{\n'
+                    '\t\t"path"\t\t"%s"\n\t}\n}\n' % self.tmp)
+        with mock.patch.object(launcher, "steam_root", return_value=self.tmp):
+            got = launcher.steam_libraries()
+        self.assertEqual(len(got), 1)
+        self.assertEqual(os.path.normcase(got[0]), os.path.normcase(lib))
+
+    def test_relocate_under_known_install(self):
+        old_install = os.path.join(self.tmp, "old", "common", "MiSide")
+        new_install = os.path.join(self.tmp, "new", "common", "MiSide")
+        old = os.path.join(old_install, "Saves")
+        new = launcher.relocate_path(old, old_install, new_install)
+        self.assertEqual(os.path.normpath(new),
+                         os.path.normpath(os.path.join(new_install, "Saves")))
+
+    def test_relocate_without_old_install_uses_marker(self):
+        """老库没存 install_dir：靠 steamapps/common/<installdir> 这段定位。"""
+        old = os.path.join("D:", os.sep, "SteamLibrary", "steamapps", "common",
+                           "MiSide", "Data", "Saves")
+        new_install = os.path.join(self.tmp, "common", "MiSide")
+        new = launcher.relocate_path(old, "", new_install, "MiSide")
+        self.assertTrue(new.endswith(os.path.join("Data", "Saves")))
+
+    def test_relocate_marker_name_mismatch(self):
+        """旧路径里的目录名对不上安装名，不能硬拼。"""
+        old = os.path.join("D:", os.sep, "SteamLibrary", "steamapps", "common",
+                           "OtherGame", "Saves")
+        new = launcher.relocate_path(old, "", os.path.join(self.tmp, "MiSide"),
+                                     "MiSide")
+        self.assertEqual(new, "")
+
+    def test_relocate_appdata_path_untouched(self):
+        """存档在 AppData 下：不在安装根里，返回空串交给候选层。"""
+        self.assertEqual(
+            launcher.relocate_path(r"C:\Users\me\AppData\LocalLow\A\B",
+                                   r"D:\Games\B", r"E:\Games\B"), "")
+
+    def test_uninstall_action_steam(self):
+        lib = self._fake_library("2001120", "Split Fiction")
+        with mock.patch.object(launcher, "steam_libraries", return_value=[lib]):
+            act = launcher.uninstall_action(appid="2001120")
+        self.assertEqual(act["method"], "steam")
+        self.assertEqual(act["target"], "steam://uninstall/2001120")
+
+    def test_uninstall_action_uninstaller(self):
+        d = os.path.join(self.tmp, "GameDir")
+        os.makedirs(d)
+        open(os.path.join(d, "unins000.exe"), "wb").close()
+        act = launcher.uninstall_action(install_dir=d)
+        self.assertEqual(act["method"], "uninstaller")
+        self.assertTrue(act["target"].endswith("unins000.exe"))
+
+    def test_uninstall_action_open_only(self):
+        """没有卸载器时只打开目录，绝不自己删。"""
+        d = os.path.join(self.tmp, "GameDir2")
+        os.makedirs(d)
+        act = launcher.uninstall_action(install_dir=d)
+        self.assertEqual(act["method"], "open")
+        self.assertEqual(os.path.normpath(act["target"]), os.path.normpath(d))
+
+    def test_uninstall_action_none(self):
+        self.assertEqual(launcher.uninstall_action()["method"], "none")
+
+
+# ==================================================================
+# 18. 存档路径诊断：ok / relocate / candidates / lost
+# ==================================================================
+class TestRelocateDiagnose(BaseSyncTest):
+    def test_ok_when_paths_exist(self):
+        d = relocate.diagnose(self.game, self.vault)
+        self.assertEqual(d["state"], "ok")
+
+    def test_missing_roots(self):
+        shutil.rmtree(self.save_dir)
+        self.assertEqual(len(relocate.missing_roots(self.game)), 1)
+
+    def test_relocate_via_manifest(self):
+        """存档在安装目录里、游戏装到了新盘 —— 按清单换算过去。
+
+        真实的卸载重装就是这样：旧安装目录整个消失，新安装目录里
+        有同样结构的存档子目录。
+        """
+        old_install = os.path.join(self.tmp, "OldLib", "steamapps", "common",
+                                   "FakeGame")
+        old_saves = os.path.join(old_install, "saves")
+        os.makedirs(old_saves)
+        write(os.path.join(old_saves, "a.sav"), b"v1")
+        g = self.vault.add_game("FakeGame2", [old_saves], install_dir=old_install)
+        self.vault.create_snapshot(g)
+
+        new_install = os.path.join(self.tmp, "NewLib", "steamapps", "common",
+                                   "FakeGame")
+        new_saves = os.path.join(new_install, "saves")
+        os.makedirs(new_saves)
+        shutil.rmtree(old_install)
+
+        info = {"install_dir": new_install, "source": "steam",
+                "confidence": "high", "installed": True,
+                "installdir": "FakeGame"}
+        with mock.patch.object(launcher, "find_install_dir", return_value=info):
+            d = relocate.diagnose(g, self.vault)
+        self.assertEqual(d["state"], "relocate")
+        self.assertEqual(os.path.normpath(d["paths"][0]),
+                         os.path.normpath(new_saves))
+        self.assertEqual(d["confidence"], "high")
+
+    def test_relocate_then_apply_keeps_history(self):
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap = self.vault.create_snapshot(self.game)
+
+        new_saves = os.path.join(self.tmp, "Moved", "saves")
+        os.makedirs(new_saves)
+        shutil.rmtree(self.save_dir)
+        relocate.apply(self.vault, self.game, [new_saves])
+
+        self.assertEqual(len(self.vault.list_snapshots(self.game.id)), 1)
+        self.assertEqual(self.vault.list_snapshots(self.game.id)[0].id, snap.id)
+        self.assertEqual(self.vault.get_game(self.game.id).paths,
+                         [os.path.abspath(new_saves)])
+
+    def test_candidates_when_no_manifest(self):
+        cand = os.path.join(self.tmp, "Cand", "saves")
+        os.makedirs(cand)
+        write(os.path.join(cand, "a.sav"), b"v1")
+        shutil.rmtree(self.save_dir)
+        with mock.patch.object(launcher, "find_install_dir", return_value={}), \
+                mock.patch.object(launcher, "candidate_save_dirs",
+                                  return_value=[cand]):
+            d = relocate.diagnose(self.game, self.vault)
+        self.assertEqual(d["state"], "candidates")
+        self.assertEqual(os.path.normpath(d["candidates"][0]["path"]),
+                         os.path.normpath(cand))
+
+    def test_lost_when_not_installed(self):
+        shutil.rmtree(self.save_dir)
+        info = {"install_dir": os.path.join(self.tmp, "nope"), "source": "steam",
+                "confidence": "high", "installed": False}
+        with mock.patch.object(launcher, "find_install_dir", return_value=info), \
+                mock.patch.object(launcher, "candidate_save_dirs",
+                                  return_value=[]):
+            d = relocate.diagnose(self.game, self.vault)
+        self.assertEqual(d["state"], "lost")
+        self.assertIn("未安装", d["note"])
+
+
+# ==================================================================
+# 19. 软删除：卸载/移除之后历史还接得上
+# ==================================================================
+class TestSoftRemove(BaseSyncTest):
+    def test_soft_remove_hides_but_keeps_snapshots(self):
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap = self.vault.create_snapshot(self.game)
+        self.vault.remove_game(self.game.id)
+
+        self.assertEqual(self.vault.list_games(), [])
+        self.assertEqual([g.id for g in self.vault.list_removed()], [self.game.id])
+        self.assertEqual(len(self.vault.list_snapshots(self.game.id)), 1)
+        self.assertEqual(self.vault.list_snapshots(self.game.id)[0].id, snap.id)
+
+    def test_readd_reuses_id_and_history(self):
+        """卸载重装（甚至换了路径）后重新添加：id 不变，历史全在。"""
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        self.vault.create_snapshot(self.game)
+        self.vault.remove_game(self.game.id)
+
+        new_dir = os.path.join(self.tmp, "NewPlace", "saves")
+        os.makedirs(new_dir)
+        shutil.rmtree(self.save_dir)          # 旧的已经随卸载消失
+        again = self.vault.add_game("FakeGame", [new_dir])
+        self.assertEqual(again.id, self.game.id)
+        self.assertEqual(len(self.vault.list_snapshots(again.id)), 1)
+        self.assertEqual([os.path.abspath(p) for p in again.paths],
+                         [os.path.abspath(new_dir)])
+
+    def test_readd_keeps_other_alive_paths(self):
+        """原本两个存档目录，这次只扫到一个 —— 另一个还活着的不能丢。"""
+        second = os.path.join(self.tmp, "FakeGame", "second")
+        os.makedirs(second)
+        self.vault.update_paths(self.game.id, [self.save_dir, second])
+        self.vault.remove_game(self.game.id)
+
+        again = self.vault.add_game("FakeGame", [self.save_dir])
+        got = sorted(os.path.abspath(p) for p in again.paths)
+        self.assertEqual(got, sorted([os.path.abspath(self.save_dir),
+                                      os.path.abspath(second)]))
+
+    def test_readd_clears_removed_and_uninstalled(self):
+        self.vault.remove_game(self.game.id)
+        self.vault.mark_uninstalled(self.game.id)
+        again = self.vault.add_game("FakeGame", [self.save_dir])
+        self.assertFalse(again.is_removed)
+        self.assertFalse(again.is_uninstalled)
+
+    def test_active_game_does_not_get_reused(self):
+        """列表里还在的游戏不会被同名新添加顶掉 id。"""
+        again = self.vault.add_game("FakeGame", [self.save_dir])
+        self.assertNotEqual(again.id, self.game.id)
+        self.assertEqual(len(self.vault.list_games()), 2)
+
+    def test_restore_removed(self):
+        self.vault.remove_game(self.game.id)
+        self.assertTrue(self.vault.restore_removed(self.game.id))
+        self.assertEqual(len(self.vault.list_games()), 1)
+
+    def test_hard_remove_deletes_row(self):
+        self.vault.remove_game(self.game.id, soft=False)
+        with self.assertRaises(KeyError):
+            self.vault.get_game(self.game.id)
+        self.assertEqual(self.vault.list_removed(), [])
+
+
+# ==================================================================
+# 20. 还原保护：目标目录不存在就不写
+# ==================================================================
+class TestRestoreGuard(BaseSyncTest):
+    def test_missing_root_not_created(self):
+        """卸载后忘了改路径就点回滚：不能把旧目录重新建出来。"""
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap = self.vault.create_snapshot(self.game)
+        shutil.rmtree(self.save_dir)
+
+        st = self.vault.restore_snapshot(self.game, snap.id, require_roots=True)
+        self.assertEqual(st["restored"], 0)
+        self.assertEqual(st["skipped"], 1)
+        self.assertEqual(len(st["missing_roots"]), 1)
+        self.assertFalse(os.path.exists(self.save_dir),
+                         "不能创建幽灵目录")
+
+    def test_guard_off_keeps_old_behavior(self):
+        """不给 require_roots 的调用方（老测试/脚本）行为不变。"""
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap = self.vault.create_snapshot(self.game)
+        shutil.rmtree(self.save_dir)
+        st = self.vault.restore_snapshot(self.game, snap.id)
+        self.assertEqual(st["restored"], 1)
+        self.assertTrue(os.path.isfile(os.path.join(self.save_dir, "a.sav")))
+
+    def test_multi_root_reports_the_missing_one(self):
+        second = os.path.join(self.tmp, "FakeGame", "second")
+        os.makedirs(second)
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        write(os.path.join(second, "b.sav"), b"v2")
+        self.vault.update_paths(self.game.id, [self.save_dir, second])
+        g = self.vault.get_game(self.game.id)
+        snap = self.vault.create_snapshot(g)
+
+        shutil.rmtree(second)
+        st = self.vault.restore_snapshot(g, snap.id, require_roots=True)
+        self.assertEqual(st["restored"], 1)                 # 第一个目录照常还原
+        self.assertEqual(len(st["missing_roots"]), 1)
+        self.assertFalse(os.path.exists(second), "缺失的那个不能被创建")
 
 
 if __name__ == "__main__":

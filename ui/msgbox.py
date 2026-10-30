@@ -26,7 +26,8 @@ _ICONS = {
 class MessageDialog(QDialog):
     """一条提示 + 一个「确定」。默认按钮带焦点，回车即可关闭。"""
 
-    def __init__(self, title, text, kind="info", detail="", parent=None):
+    def __init__(self, title, text, kind="info", detail="", parent=None,
+                 ask=False, ok_text="确定", cancel_text="取消"):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(420)
@@ -55,13 +56,17 @@ class MessageDialog(QDialog):
         row.addWidget(body, 1)
         lay.addLayout(row)
 
-        btn = QPushButton("确定")
+        btn = QPushButton(ok_text)
         btn.setObjectName("Primary")
         btn.setDefault(True)
         btn.setAutoDefault(True)
         btn.clicked.connect(self.accept)
         bb = QHBoxLayout()
         bb.addStretch(1)
+        if ask:
+            cancel = QPushButton(cancel_text)
+            cancel.clicked.connect(self.reject)
+            bb.addWidget(cancel)
         bb.addWidget(btn)
         lay.addLayout(bb)
         self._btn = btn
@@ -87,3 +92,14 @@ def error(parent, title, text, **kw):
 def done(parent, title, text, **kw):
     """操作成功。与 info 同形，只是换成绿色对勾。"""
     return MessageDialog(title, text, "done", parent=parent).exec()
+
+
+def ask(parent, title, text, ok_text="确定", cancel_text="取消", **kw):
+    """是/否询问。返回 True 表示用户点了确定。
+
+    同样不碰系统提示音 —— 这里刻意不用 QMessageBox.question，
+    那个在所有 Windows 上都会「叮」一声。
+    """
+    return MessageDialog(title, text, "info", parent=parent, ask=True,
+                         ok_text=ok_text, cancel_text=cancel_text
+                         ).exec() == MessageDialog.Accepted

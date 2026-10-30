@@ -3,6 +3,45 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.4.0] - 2026-10-31
+
+卸载重装之后，历史还能接上吗？这一版解决的就是这个。
+
+### 新增
+
+- **卸载游戏**：直接交给平台自己的卸载器 —— Steam 走
+  `steam://uninstall/<appid>`，Epic 走 `com.epicgames.launcher://`，
+  独立游戏跑自带的 `unins000.exe`，都识别不出就只打开安装目录。
+  **卸载前强制备份一次且不可关闭**：存档在安装目录里的游戏，平台卸载
+  会连存档一起删。
+- **存档路径找回**（`gamesave/relocate.py`）：四层回退 —— 原路径 /
+  平台清单算出新安装根 / 同名目录 / 快照文件名指纹。高置信直接应用并在
+  确认框里写明「写到哪个目录」，模糊候选一律交用户选。
+- **软删除**：移除游戏只打 `removed_at` 标记，id 与快照全留；工具栏
+  「已移除…」可随时放回。重新添加同名游戏时复用旧 id，历史自动接回。
+- `gamesave/launcher.py`：Steam `libraryfolders.vdf` + `appmanifest_*.acf`、
+  Epic `*.item` 清单解析，全部读本地文件、不联网。
+
+### 修复
+
+- **还原写入幽灵目录**：目标存档目录不存在时，`os.makedirs` 会把旧目录
+  重新建出来，存档写进游戏读不到的位置，界面还报「还原成功」。
+  现在 `restore_snapshot(require_roots=True)` 会整根跳过并如实报告。
+- **空快照挤占历史配额**：所有存档目录失效时，备份只产出 0 文件快照，
+  而保留策略按份数算 —— 定时备份一小时一次，一天就能把 30 份配额冲干净。
+  现在这类游戏直接跳过并记日志。
+- **状态误导**：目录不存在时仍显示「已同步」，现在明确提示「N 个存档目录
+  不存在，点「找回存档」重新定位」。
+- `vault._migrate()`：老库升级时显式 `ALTER TABLE` 补列，否则 `SELECT *`
+  出来的行缺字段，构造 `Game` 直接 `TypeError`。
+
+### 测试
+
+- 单元测试 123 → **152**：清单解析 / 路径换算 / 四层诊断 / 软删除复用 /
+  还原保护，全部不碰真实文件系统与真实平台。
+- GUI 冒烟新增第 10 节：软删除 → 重新添加复用 id → 按清单重新定位 →
+  卸载前备份 → 走平台协议而非自己删文件。
+
 ## [1.3.2] - 2026-10-30
 
 ### 变更
@@ -204,6 +243,7 @@
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.4.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.4.0
 [1.3.2]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.2
 [1.3.1]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.1
 [1.3.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.0

@@ -612,3 +612,111 @@ def _open_url(url):
     from PySide6.QtGui import QDesktopServices
     from PySide6.QtCore import QUrl
     QDesktopServices.openUrl(QUrl(url))
+
+
+# ==================================================================
+# 存档路径找回
+# ==================================================================
+class PickPathDialog(QDialog):
+    """从候选目录里挑一个，或手动浏览。
+
+    只在「模糊层」用（同名目录 / 快照指纹命中）。如果平台清单能确定
+    新位置，调用方会直接用，不弹这个框 —— 见 relocate.diagnose 的 state。
+    """
+
+    def __init__(self, title, candidates, hint="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(680, 460)
+        self.result_path = ""
+
+        lay = QVBoxLayout(self)
+        if hint:
+            tip = QLabel(hint)
+            tip.setWordWrap(True)
+            tip.setStyleSheet("color:%s;" % PALETTE["muted"])
+            lay.addWidget(tip)
+        lay.addWidget(QLabel("找到以下疑似存档目录，选中一个："))
+
+        self.list = QListWidget()
+        lay.addWidget(self.list)
+        for c in candidates or []:
+            p = c.get("path") if isinstance(c, dict) else c
+            n = (c.get("matched") if isinstance(c, dict) else 0) or 0
+            text = p if not n else "%s\n    与快照同名文件 %d 个" % (p, n)
+            it = QListWidgetItem(text)
+            it.setData(Qt.UserRole, p)
+            self.list.addItem(it)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+
+        row = QHBoxLayout()
+        self.manual = QLineEdit()
+        self.manual.setPlaceholderText("也可以直接填一个绝对路径")
+        browse = QPushButton("浏览…")
+        browse.clicked.connect(self._browse)
+        row.addWidget(self.manual)
+        row.addWidget(browse)
+        lay.addLayout(row)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.button(QDialogButtonBox.Ok).setText("用这个目录")
+        btns.accepted.connect(self._ok)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def _browse(self):
+        d = QFileDialog.getExistingDirectory(self, "选择存档目录")
+        if d:
+            self.manual.setText(d)
+
+    def _ok(self):
+        p = self.manual.text().strip()
+        if not p:
+            it = self.list.currentItem()
+            p = it.data(Qt.UserRole) if it else ""
+        if not p or not os.path.isdir(p):
+            msgbox.warn(self, "路径无效", "请选择一个已存在的目录。")
+            return
+        self.result_path = os.path.normpath(p)
+        self.accept()
+
+
+class RemovedGamesDialog(QDialog):
+    """已移除的游戏列表，可放回。
+
+    移除是软删除：id 和快照都还在，放回来只是清掉标记，历史原样可见。
+    """
+
+    def __init__(self, games, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("已移除的游戏")
+        self.resize(640, 420)
+        self.picked = []
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("这些游戏已从列表移除，快照仍然保留："))
+        self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        lay.addWidget(self.list)
+        for g in games:
+            text = "%s\n    移除于 %s  ·  %d 个存档目录" % (
+                g.name, _fmt(g.removed_at), len(g.paths))
+            it = QListWidgetItem(text)
+            it.setData(Qt.UserRole, g.id)
+            self.list.addItem(it)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.button(QDialogButtonBox.Ok).setText("放回列表")
+        btns.accepted.connect(self._ok)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def _ok(self):
+        self.picked = [it.data(Qt.UserRole) for it in self.list.selectedItems()]
+        if not self.picked:
+            msgbox.warn(self, "没选游戏", "请先选中要放回的游戏。")
+            return
+        self.accept()
