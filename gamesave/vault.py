@@ -614,17 +614,28 @@ class Vault:
     # ==========================================================
     def restore_snapshot(self, game: Game, sid: str, safety: bool = True,
                          progress_cb=None, only_paths=None,
-                         require_roots: bool = False) -> dict:
+                         require_roots: bool = False, pre_backup: bool = True,
+                         stage_cb=None) -> dict:
         """把快照还原到游戏目录。
 
-        safety=True 时，每个将被覆盖/删除的现有文件先复制到 localcopies/ 留底。
-        only_paths 给定则只还原这些相对路径（用于单文件回滚）。
+        pre_backup=True 时，先把「当前档位」整份存成一个 kind=restore 的快照，
+        成功之后才开始覆盖。顺序不能倒：备份失败就直接抛异常，一个字节都
+        不写；否则用户会同时失去旧档和新档。
+
+        safety=True 时，每个将被覆盖的现有文件额外复制到 localcopies/ 留底。
+        它和 pre_backup 不是一回事 —— localcopies 只有被覆盖的那几个文件，
+        没有版本记录、历史列表里看不见；pre_backup 是完整档位，能直接退回。
+
+        only_paths 给定则只还原这些相对路径（用于单文件回滚），但 pre_backup
+        仍然备份整个档位（单文件还原也可能是改错了一个关键文件）。
         require_roots=True 时，目标根目录不存在就跳过该根下的所有文件，
         不再 os.makedirs 把「幽灵目录」建出来。卸载游戏后忘了改路径时，
         旧行为会静默把存档写回一个已经不存在的位置，界面还报成功 ——
         游戏实际读新路径，等于白还原。界面层一律传 True。
 
-        返回 {"restored","backed_up","skipped","bytes","missing_roots"}
+        返回 {"restored","backed_up","skipped","bytes","missing_roots",
+              "pre_snapshot"}
+        pre_snapshot 是还原前备份的快照 id；当前档位本来就是空的则为 ""。
         """
         snap = self.get_snapshot(sid)
         targets = {e.path: e for e in snap.files}
@@ -632,13 +643,14 @@ class Vault:
             targets = {p: targets[p] for p in only_paths if p in targets}
 
         stats = {"restored": 0, "backed_up": 0, "skipped": 0, "bytes": 0,
-                 "missing_roots": []}
-        total = max(len(targets), 1)
-        done = 0
+                 "missing_roots": [], "pre_snapshot": "", "pre_files": 0}
 
         # 目标根目录：优先用当前配置的路径，快照里记录的历史路径作为兜底
         roots = self._roots_for(game, snap)
 
+        # 先把「真正会写」的目标筛出来。根目录不存在的先跳过，
+        # 免得为一个根本写不进去的目录白备一份快照。
+        plan = []
         for rel, e in targets.items():
             if require_roots:
                 root = self._root_of(roots, rel)
@@ -651,6 +663,28 @@ class Vault:
             if dst is None:
                 stats["skipped"] += 1
                 continue
+            plan.append((rel, e, dst))
+
+        if pre_backup and plan:
+            if stage_cb:
+                stage_cb("正在备份当前档位…")
+            when = time.strftime("%Y-%m-%d %H:%M",
+                                 time.localtime(snap.created_at))
+            pre = self.create_snapshot(
+                game, kind="restore",
+                note="还原到 %s 之前的自动备份" % when)
+            if pre.files:
+                stats["pre_snapshot"] = pre.id
+                stats["pre_files"] = len(pre.files)
+            else:
+                # 当前档位是空的，没什么可丢的。空快照既没信息量又会挤占
+                # 保留配额，直接收掉。
+                self.delete_snapshot(pre.id)
+            if stage_cb:
+                stage_cb("正在写入存档…")
+
+        total = max(len(plan), 1)
+        for done, (rel, e, dst) in enumerate(plan, 1):
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             if safety and os.path.isfile(dst):
                 self._backup_existing(game.id, rel, dst, reason="restore:%s" % sid)
@@ -658,9 +692,16 @@ class Vault:
             with open(dst, "wb") as out:
                 for c in e.chunks:
                     out.write(self.store.read_decompressed(c.sha256))
+            # 时间戳一起复原。除了「完全回到那一版」的语义，它还决定了
+            # 下次 status() 的快速扫描能否走缓存 —— 写入时间与快照记录的
+            # 不一致时，同尺寸文件会被当成「内容变了」。
+            if e.mtime:
+                try:
+                    os.utime(dst, (e.mtime, e.mtime))
+                except OSError:
+                    pass          # 时间戳设不上不影响内容，不值得中断还原
             stats["restored"] += 1
             stats["bytes"] += e.size
-            done += 1
             if progress_cb:
                 progress_cb(done, total)
 

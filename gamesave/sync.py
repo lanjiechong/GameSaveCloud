@@ -160,12 +160,27 @@ class SyncEngine:
         dirty = [p for p in set(lmap) | set(rmap)
                  if (lmap[p].sha256 if p in lmap else None)
                  != (rmap[p].sha256 if p in rmap else None)]
-        if dirty:
-            st.state = SYNC_LOCAL_AHEAD
-            st.message = "本地有 %d 个文件较上次备份有变化" % len(dirty)
-        else:
+        if not dirty:
             st.state = SYNC_SYNCED
             st.message = "已备份到本地保险库"
+            return st
+
+        # 与最新快照不一致，不等于「没备份过」。还原到某个旧版本之后，
+        # 最新快照存的是还原前的内容（kind=restore），本地当然和它对不上；
+        # 只看最新就会一直误报「有 N 个文件待备份」，用户每还原一次都被
+        # 推着再备份一遍。按内容在全部历史里找：当前这份内容只要原样存过，
+        # 就已经是安全的。比 sha256 而不是比指纹 —— 指纹含分块序列，
+        # 同一份内容被不同分块方式存过会误判成不同。
+        want = {e.path: e.sha256 for e in local}
+        for s in snaps[1:]:
+            if {e.path: e.sha256 for e in s.files} == want:
+                st.state = SYNC_SYNCED
+                st.message = "当前内容与 %s 那版一致" % time.strftime(
+                    "%m-%d %H:%M", time.localtime(s.created_at))
+                return st
+
+        st.state = SYNC_LOCAL_AHEAD
+        st.message = "本地有 %d 个文件较上次备份有变化" % len(dirty)
         return st
 
     # ==========================================================

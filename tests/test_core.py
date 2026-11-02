@@ -459,6 +459,84 @@ class TestSnapshotAndRollback(BaseSyncTest):
         self.assertEqual(read(os.path.join(self.save_dir, "a.sav")), b"a-v1")
         self.assertEqual(read(os.path.join(self.save_dir, "b.sav")), b"b-v2")
 
+    # ---------- 还原前自动备份当前档位 ----------
+    def _entry_bytes(self, e):
+        return b"".join(self.vault.store.read_decompressed(c.sha256)
+                        for c in e.chunks)
+
+    def test_restore_backs_up_current_before_overwrite(self):
+        """还原前整份备份当前档位 —— 误操作能退回去，全靠这一步。"""
+        write(os.path.join(self.save_dir, "a.sav"), b"old-v1")
+        snap1 = self.vault.create_snapshot(self.game)
+
+        write(os.path.join(self.save_dir, "a.sav"), b"current-v2")
+        write(os.path.join(self.save_dir, "b.sav"), b"only-in-current")
+
+        st = self.vault.restore_snapshot(self.game, snap1.id)
+        self.assertTrue(st["pre_snapshot"])
+        self.assertEqual(st["pre_files"], 2)
+
+        pre = self.vault.get_snapshot(st["pre_snapshot"])
+        self.assertEqual(pre.kind, "restore")
+        self.assertEqual({e.path: self._entry_bytes(e) for e in pre.files},
+                         {"a.sav": b"current-v2",
+                          "b.sav": b"only-in-current"})
+        # 备份不影响还原本身
+        self.assertEqual(read(os.path.join(self.save_dir, "a.sav")), b"old-v1")
+        self.assertEqual(read(os.path.join(self.save_dir, "b.sav")),
+                         b"only-in-current")
+
+    def test_pre_backup_roundtrip_undoes_restore(self):
+        """拿还原前备份再还原一次，必须精确回到操作前的状态。"""
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap1 = self.vault.create_snapshot(self.game)
+        write(os.path.join(self.save_dir, "a.sav"), b"v2")
+        write(os.path.join(self.save_dir, "b.sav"), b"b-in-v2")
+
+        st = self.vault.restore_snapshot(self.game, snap1.id)
+        self.assertEqual(read(os.path.join(self.save_dir, "a.sav")), b"v1")
+
+        st2 = self.vault.restore_snapshot(self.game, st["pre_snapshot"])
+        self.assertEqual(read(os.path.join(self.save_dir, "a.sav")), b"v2")
+        self.assertEqual(read(os.path.join(self.save_dir, "b.sav")), b"b-in-v2")
+        # 第二次还原又把「还原后的状态」备份了一次，形成可回溯的链条
+        self.assertTrue(st2["pre_snapshot"])
+
+    def test_pre_backup_can_be_disabled(self):
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap1 = self.vault.create_snapshot(self.game)
+        write(os.path.join(self.save_dir, "a.sav"), b"v2")
+        st = self.vault.restore_snapshot(self.game, snap1.id, pre_backup=False)
+        self.assertEqual(st["pre_snapshot"], "")
+        self.assertEqual([s for s in self.vault.list_snapshots(self.game.id)
+                          if s.kind == "restore"], [])
+
+    def test_pre_backup_empty_local_leaves_no_empty_snapshot(self):
+        """当前档位是空的，就不留空快照去挤占历史。"""
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap1 = self.vault.create_snapshot(self.game)
+        os.remove(os.path.join(self.save_dir, "a.sav"))
+
+        st = self.vault.restore_snapshot(self.game, snap1.id)
+        self.assertEqual(st["pre_snapshot"], "")
+        self.assertEqual([s for s in self.vault.list_snapshots(self.game.id)
+                          if s.kind == "restore"], [])
+        self.assertEqual(read(os.path.join(self.save_dir, "a.sav")), b"v1")
+
+    def test_pre_backup_failure_aborts_before_writing(self):
+        """备份失败必须一个字节都不写 —— 否则新旧两份同时没了。"""
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap1 = self.vault.create_snapshot(self.game)
+        write(os.path.join(self.save_dir, "a.sav"), b"v2")
+
+        with mock.patch.object(self.vault, "create_snapshot",
+                               side_effect=OSError("磁盘满")):
+            with self.assertRaises(OSError):
+                self.vault.restore_snapshot(self.game, snap1.id)
+
+        self.assertEqual(read(os.path.join(self.save_dir, "a.sav")), b"v2")
+        self.assertEqual(self.vault.list_local_copies(self.game.id), [])
+
     def test_snapshot_roundtrip_json(self):
         write(os.path.join(self.save_dir, "a.sav"), b"payload" * 100)
         snap = self.vault.create_snapshot(self.game)
@@ -742,6 +820,23 @@ class TestLocalOnlyMode(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.save_dir, "a.sav")), b"good")
         st = self.engine.status(self.game)
         self.assertEqual(st.state, SYNC_SYNCED)
+
+    def test_restore_to_older_version_is_not_reported_dirty(self):
+        """还原到旧版后不该被误报「待备份」—— 这份内容已经在库里了。
+
+        还原前的当前档位会存成最新一份快照，本地自然和它不同；
+        只跟最新比就会一直显示「有 N 个文件待备份」，把用户推去做无谓备份。
+        """
+        write(os.path.join(self.save_dir, "a.sav"), b"v1")
+        snap1 = self.vault.create_snapshot(self.game)
+        write(os.path.join(self.save_dir, "a.sav"), b"v2-longer-content")
+        self.vault.create_snapshot(self.game)
+        self.assertEqual(self.engine.status(self.game).state, SYNC_SYNCED)
+
+        self.vault.restore_snapshot(self.game, snap1.id)
+        st = self.engine.status(self.game)
+        self.assertEqual(st.state, SYNC_SYNCED)
+        self.assertIn("一致", st.message)
 
 
 # ==================================================================

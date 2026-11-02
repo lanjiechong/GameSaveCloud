@@ -1,11 +1,11 @@
 # GameSaveCloud
 
 跨平台桌面端的游戏存档备份与同步工具，对标 UU 加速器「云存档」。
-核心承诺：**任何情况下不丢存档** —— 覆盖、回滚、冲突、删除，每一步之前都先留底。
+核心承诺：**任何情况下不丢存档** —— 覆盖、还原、冲突、删除，每一步之前都先留底。
 
 约 6200 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
 
-**当前版本 v1.4.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
+**当前版本 v1.5.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -68,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 152 个核心引擎单元测试
+python tests/test_core.py                                # 158 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -98,14 +98,14 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 |---|------|---------|
 | 1 | 自动扫描常见存档目录 + 手动添加自定义路径 | `gamesave/scanner.py`（150 款已知游戏查表 + 启发式扫描），`ui/dialogs.py::AddGameDialog` |
 | 2 | 上传/下载/增量同步、压缩、去重、断点续传 | `gamesave/chunker.py` + `gamesave/store.py` + `gamesave/remote.py` + `gamesave/sync.py` |
-| 3 | 版本历史、查看、对比、一键回滚 | `gamesave/vault.py::restore_snapshot`，`HistoryDialog` / `DiffDialog` |
+| 3 | 版本历史、查看、对比、一键还原 | `gamesave/vault.py::restore_snapshot`（`pre_backup` 还原前整份备份当前档位），`HistoryDialog` / `DiffDialog` |
 | 4 | 冲突检测与三选一处理 | `gamesave/sync.py::_decide`，`ConflictDialog` |
 | 5 | 覆盖/恢复前自动本地留底 | `gamesave/vault.py::_backup_existing` → `localcopies/` |
 | 交互 | 图形界面展示状态/时间/占用 | `ui/main_window.py`（自绘列表 + 状态卡片），图标见 `ui/logos.py`、排版见 `ui/game_list.py` |
 | 交互 | **图标与中文名自动匹配** | `gamesave/gamemeta.py`（Steam 搜索 + 中文名解析 + 退避），`ui/metaservice.py`（后台批量调度），落库见 `vault.py::save_meta`（见 §10.3） |
 | 数据 | **离线资料索引 + 多数据源调研** | `gamesave/gameindex.py` + `ui/assets/gameindex.json`（随包分发），构建工具 `scripts/build_game_index.py`（见 §10.5） |
 | 生命周期 | **卸载游戏 / 存档路径找回** | `gamesave/launcher.py`（Steam/Epic 清单 + 卸载动作），`gamesave/relocate.py`（四层路径回退），软删除见 `vault.py::remove_game`（见 §10.6） |
-| 交互 | 危险操作二次确认 | `ConfirmDialog`（默认焦点在「取消」，回滚还需勾选确认框） |
+| 交互 | 危险操作二次确认 | `ConfirmDialog`（默认焦点在「取消」，还原还需勾选确认框） |
 | 交互 | 定时自动备份 + 静默同步 | `ui/main_window.py::_build_timer` / `_on_tick`，`config.schedule` |
 | 交互 | 网络异常/冲突清晰提示 | 后台失败只记日志 + 置错误态；冲突中断同步并弹窗交人决策 |
 | 交互 | **本地备份为主，云端可选** | `config.remote.enabled` 默认 `false`；未配置时 `remote` 后端对象根本不创建，界面文案从「同步」切换为「备份」（见 §10） |
@@ -304,7 +304,7 @@ vault/                                  本地保险库（默认 %LOCALAPPDATA%/
 │   └── _tmp/                           正在写的 .part（count/total_size 不计入）
 ├── snapshots/
 │   └── <snapshot_id>.json              每个快照一份人可读 JSON，便于排查
-├── localcopies/                        覆盖 / 回滚 / 删除前的安全留底
+├── localcopies/                        覆盖 / 还原 / 删除前的安全留底
 │   └── <game_id8>_<时间戳>_<路径>.副本
 ├── index.db                            SQLite（WAL 模式）
 └── config.json                         应用配置
@@ -442,12 +442,12 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 
 | 场景 | 保护措施 |
 |---|---|
-| 回滚覆盖现有存档 | 覆盖前 `shutil.copy2` 到 `localcopies/<game>_<时间戳>_<路径>` |
+| 还原覆盖现有存档 | **先把整个当前档位存成一份 `kind=restore` 快照**（备份失败则一个字节都不写），再逐文件 `shutil.copy2` 到 `localcopies/` |
 | 同步下载覆盖本地 | 同上，`reason="sync-overwrite"` |
 | 云端删除传播到本地 | 删之前留底，`reason="sync-delete"` |
 | 冲突选「使用云端」 | 被覆盖的本地版本留底后才写入 |
 | 冲突选「另存为新版本」 | 两边都落盘，一个都不丢 |
-| 回滚操作本身 | `ConfirmDialog` + 强制勾选「我已了解上述后果」 |
+| 还原操作本身 | `ConfirmDialog` + 强制勾选「我已了解上述后果」；还原后历史里多一条「还原前」备份，可原路退回 |
 | 同步中途失败 | 不推进 base，下次重试，不会把半成品当共识 |
 | chunk 静默损坏 | `store.verify()` 解压后重算哈希 |
 
@@ -459,7 +459,7 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 ## 8. 测试
 
 ```bash
-python tests/test_core.py                  # 152 个单元测试
+python tests/test_core.py                  # 158 个单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 ```
 
@@ -469,7 +469,8 @@ QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 - 三种压缩标签的往返、压缩无益时原样存放
 - chunk 去重、跨游戏共享、`verify()` 发现篡改、`gc()` 只清理无引用 chunk
 - `_decide` 三方合并真值表逐格
-- 快照 → 修改 → 回滚（含 `only_paths` 单文件回滚、`safety=False`）
+- 快照 → 修改 → 还原（含 `only_paths` 单文件还原、`safety=False`）
+- 还原前自动备份：内容正确、能原路退回、备份失败不写入、空档位不留空快照
 - 覆盖前留底、留底内容正确
 - 首次全量上传、第二次零上传、改 10 字节只重传受影响 chunk
 - 云端领先时下载并覆盖本地
@@ -902,6 +903,6 @@ Python 运行时为 PSF）的完整声明、动态链接合规说明与 Qt 可�
 **关于 AI 辅助开发的说明**：本项目在开发过程中使用了 AI 编程助手
 参与代码编写与问题排查。需求取舍、架构设计、安全模型（留底机制、
 三方合并基准、内容哈希判定等）与最终代码均由人类作者审阅、测试并负责；
-全部核心行为由 `tests/test_core.py` 的 152 个单元测试钉住。如发现任何
+全部核心行为由 `tests/test_core.py` 的 158 个单元测试钉住。如发现任何
 疑似侵权内容，请在 [Issues](https://github.com/lanjiechong/GameSaveCloud/issues)
 反馈，核实后立即处理。

@@ -438,6 +438,82 @@ def main():
         _L.find_install_dir = orig_find
         _L.uninstall_action = orig_action
 
+    # ================================================================
+    print("[11] 还原：先备份当前档位，再替换，可原路退回")
+    # ================================================================
+    from PySide6.QtCore import Qt as _Qt
+    from ui.dialogs import ConfirmDialog
+
+    rd = os.path.join(TMP, "restoregame", "saves")
+    os.makedirs(rd)
+    rpath = os.path.join(rd, "r.sav")
+
+    def rwrite(data):
+        with open(rpath, "wb") as f:
+            f.write(data)
+
+    def rread():
+        with open(rpath, "rb") as f:
+            return f.read()
+
+    rwrite(b"version-1")
+    rg = w.vault.add_game("RestoreGame", [rd])
+    snap_old = w.vault.create_snapshot(rg, kind="manual")
+    rwrite(b"version-2-current")
+    w.vault.create_snapshot(rg, kind="manual")
+    w.refresh_all()
+    pump(ms=1500, rounds=4)
+    check("游戏出现在列表里", select_game(rg.id))
+    pump(ms=600, rounds=3)
+
+    row = -1
+    for i in range(w.snap_table.rowCount()):
+        s = w.snap_table.item(i, 0).data(_Qt.UserRole)
+        if s is not None and s.id == snap_old.id:
+            row = i
+    check("历史表里能定位到要还原的版本", row >= 0, "row=%d" % row)
+    w.snap_table.setCurrentCell(row, 0)
+
+    orig_ask = ConfirmDialog.ask
+    ConfirmDialog.ask = staticmethod(lambda *a, **k: True)
+    try:
+        w.restore_selected()
+        pump(ms=2500, rounds=6)
+        check("还原把当前档替换成所选版本", rread() == b"version-1",
+              repr(rread()))
+
+        pres = [s for s in w.vault.list_snapshots(rg.id)
+                if s.kind == "restore"]
+        check("还原前自动备份了当前档位", len(pres) == 1, "%d 条" % len(pres))
+        pre = pres[0] if pres else None
+        body = b""
+        if pre:
+            ent = [e for e in pre.files if e.path == "r.sav"]
+            body = b"".join(w.vault.store.read_decompressed(c.sha256)
+                            for c in ent[0].chunks) if ent else b""
+        check("备份存的是操作前的内容", body == b"version-2-current", repr(body))
+
+        # 原路退回：把那条备份再还原一次
+        if pre:
+            w.refresh_all()
+            pump(ms=1200, rounds=3)
+            check("还原后仍能选中该游戏", select_game(rg.id))
+            pump(ms=600, rounds=3)
+            row2 = -1
+            for i in range(w.snap_table.rowCount()):
+                s = w.snap_table.item(i, 0).data(_Qt.UserRole)
+                if s is not None and s.id == pre.id:
+                    row2 = i
+            check("还原前备份出现在历史表里", row2 >= 0, "row=%d" % row2)
+            if row2 >= 0:
+                w.snap_table.setCurrentCell(row2, 0)
+                w.restore_selected()
+                pump(ms=2500, rounds=6)
+                check("用备份还原可退回操作前",
+                      rread() == b"version-2-current", repr(rread()))
+    finally:
+        ConfirmDialog.ask = orig_ask
+
     # --- 汇总 ---
     print()
     if FAILS:

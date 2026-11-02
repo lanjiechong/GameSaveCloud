@@ -264,7 +264,8 @@ class HistoryDialog(QDialog):
 
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel("每次备份都会保留一份完整快照。chunk 级去重让历史版本"
-                             "几乎不占额外空间。选择两条记录可对比差异。"))
+                             "几乎不占额外空间。选择两条记录可对比差异。"
+                             "还原前会先把当前档位完整备份一份，可随时退回。"))
 
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["时间", "类型", "文件数", "体积", "说明"])
@@ -280,7 +281,7 @@ class HistoryDialog(QDialog):
         row = QHBoxLayout()
         b_diff = QPushButton("与上一版对比差异")
         b_diff.clicked.connect(self._diff)
-        b_roll = QPushButton("回滚到所选版本")
+        b_roll = QPushButton("还原到此版本")
         b_roll.setObjectName("Danger")
         b_roll.clicked.connect(self._rollback)
         row.addStretch(1)
@@ -297,7 +298,7 @@ class HistoryDialog(QDialog):
         for r, s in enumerate(self.snapshots):
             self.table.setItem(r, 0, QTableWidgetItem(_fmt(s.created_at)))
             kind = {"manual": "手动", "auto": "自动", "sync": "同步",
-                    "restore": "回滚"}.get(s.kind, s.kind)
+                    "restore": "还原前"}.get(s.kind, s.kind)
             self.table.setItem(r, 1, QTableWidgetItem(kind))
             self.table.setItem(r, 2, QTableWidgetItem(str(len(s.files))))
             self.table.setItem(r, 3, QTableWidgetItem(_human(s.total_size)))
@@ -325,9 +326,11 @@ class HistoryDialog(QDialog):
     def _rollback(self):
         s = self._current()
         if not s:
-            msgbox.info(self, "未选择", "请先选择要回滚到的版本。")
+            msgbox.info(self, "未选择", "请先选择要还原到的版本。")
             return
+        # 还原完历史列表就变了，这个窗口留着也是过期数据，先关掉。
         self.on_rollback(s)
+        self.accept()
 
 
 class DiffDialog(QDialog):

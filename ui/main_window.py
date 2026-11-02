@@ -254,6 +254,10 @@ class MainWindow(QMainWindow):
         self.b_history.clicked.connect(self.show_history)
         self.b_files = QPushButton("查看文件")
         self.b_files.clicked.connect(self.show_files)
+        self.b_restore = QPushButton("还原选中版本")
+        self.b_restore.setObjectName("Danger")
+        self.b_restore.setToolTip("用选中的历史版本替换当前存档；替换前会先把当前档位完整备份")
+        self.b_restore.clicked.connect(self.restore_selected)
         self.b_sync_one = QPushButton("同步此游戏")
         self.b_sync_one.setObjectName("Primary")
         self.b_sync_one.clicked.connect(self.sync_current)
@@ -265,7 +269,7 @@ class MainWindow(QMainWindow):
         self.b_uninstall = QPushButton("卸载游戏")
         self.b_uninstall.setToolTip("先备份一次，再交给 Steam / Epic 自己的卸载器")
         self.b_uninstall.clicked.connect(self.uninstall_game)
-        for b in (self.b_history, self.b_files, self.b_sync_one,
+        for b in (self.b_history, self.b_files, self.b_restore, self.b_sync_one,
                   self.b_find, self.b_remove, self.b_uninstall):
             acts.addWidget(b)
         acts.addStretch(1)
@@ -538,7 +542,7 @@ class MainWindow(QMainWindow):
         self.snap_table.setRowCount(len(snaps))
         for r, s in enumerate(snaps):
             kind = {"manual": "手动", "auto": "自动", "sync": "同步",
-                    "restore": "回滚"}.get(s.kind, s.kind)
+                    "restore": "还原前"}.get(s.kind, s.kind)
             self.snap_table.setItem(r, 0, QTableWidgetItem(_fmt(s.created_at)))
             self.snap_table.setItem(r, 1, QTableWidgetItem(kind))
             self.snap_table.setItem(r, 2, QTableWidgetItem(str(len(s.files))))
@@ -554,8 +558,8 @@ class MainWindow(QMainWindow):
             # 新一轮任务开始，清掉上一轮可能残留的取消标记
             self._cancel_event.clear()
         for b in (self.b_backup, self.b_sync, self.b_add, self.b_refresh,
-                  self.b_history, self.b_files, self.b_sync_one, self.b_remove,
-                  self.b_find, self.b_uninstall):
+                  self.b_history, self.b_files, self.b_restore, self.b_sync_one,
+                  self.b_remove, self.b_find, self.b_uninstall):
             b.setEnabled(not on)
         self.b_stop.setEnabled(on)
         if on:
@@ -871,6 +875,29 @@ class MainWindow(QMainWindow):
             return
         HistoryDialog(g, snaps, self._do_rollback, self._show_diff, self).exec()
 
+    def restore_selected(self):
+        """还原内嵌历史表里选中的那一版。
+
+        没选行时不猜 —— 悄悄挑最新一版直接弹确认框，正是误操作的来源。
+        """
+        g = self.current_game()
+        if not g:
+            msgbox.info(self, "未选择", "请先在左侧选择一个游戏。")
+            return
+        if self.snap_table.rowCount() == 0:
+            msgbox.info(self, "没有历史版本", "请先执行一次备份。")
+            return
+        r = self.snap_table.currentRow()
+        if r < 0:
+            msgbox.info(self, "没有选中版本",
+                        "请先在下面的「历史版本」表里点选一行，再点还原。\n\n"
+                        "表里类型为「还原前」的是上次还原时自动留的备份。")
+            return
+        it = self.snap_table.item(r, 0)
+        snap = it.data(Qt.UserRole) if it else None
+        if snap:
+            self._do_rollback(snap)
+
     def _show_diff(self, old, new):
         DiffDialog(old, new, self).exec()
 
@@ -887,35 +914,37 @@ class MainWindow(QMainWindow):
                           ok_text="去找回", cancel_text="仍然还原"):
                 self.find_save_dir()
                 return
-        push = ("回滚后本地内容与该版本完全一致，随后同步会把此版本推送到云端。"
+        push = ("还原后本地内容与该版本完全一致，随后同步会把此版本推送到云端。"
                 if self.cloud_on else
-                "当前为本地备份模式，回滚只影响本地目录与本地保险库。")
-        detail = ("将把 %s 回滚到 %s 的快照：\n\n"
+                "当前为本地备份模式，还原只影响本地目录与本地保险库。")
+        detail = ("将把 %s 的当前存档替换成 %s 这一版：\n\n"
                   "  版本时间：%s\n"
                   "  文件数量：%d\n"
                   "  总体积：%s\n"
                   "  写入目录：%s\n\n"
-                  "当前存档目录里被覆盖的文件，会先自动复制到 "
-                  "本地保险库的 localcopies/ 留底。\n%s"
+                  "替换前会先把「当前档位」整份备份成一个新快照（还原前备份）。"
+                  "如果还原后不满意，到「历史版本」里选中那条备份再还原一次，"
+                  "就能退回操作前的状态。\n%s"
                   % (g.name, _fmt(snap.created_at), _fmt(snap.created_at),
                      len(snap.files), _human(snap.total_size),
                      " / ".join(g.paths), push))
         if self.cfg.safety.get("confirm_dangerous", True) and not ConfirmDialog.ask(
-                "回滚存档 —— %s" % g.name,
-                "此操作会用旧版本覆盖当前存档，属于不可逆操作。",
+                "还原存档 —— %s" % g.name,
+                "这会把当前存档替换成所选版本。操作前的当前档位会被完整备份，可随时退回。",
                 detail, require_check=True, parent=self):
             return
-        self._set_busy(True, "正在回滚…")
+        self._set_busy(True, "正在还原…")
 
         def job(sig):
             return self.vault.restore_snapshot(
                 g, snap.id, safety=self.cfg.safety["keep_local_copy"],
-                require_roots=True,
-                progress_cb=lambda c, t: self._task_progress(sig, "回滚", c, t))
+                require_roots=True, pre_backup=True,
+                stage_cb=lambda text: sig.progress.emit(text, 0, 0),
+                progress_cb=lambda c, t: self._task_progress(sig, "还原", c, t))
 
         def done(st):
             if st.get("missing_roots"):
-                self._log("回滚中止：目标目录不存在 —— %s"
+                self._log("还原中止：目标目录不存在 —— %s"
                           % " / ".join(st["missing_roots"]))
                 self._set_busy(False)
                 msgbox.warn(self, "没有写入",
@@ -923,15 +952,19 @@ class MainWindow(QMainWindow):
                             "请先点「找回存档」定位新位置。"
                             % "\n".join(st["missing_roots"]))
                 return
-            self._log("回滚完成：还原 %d 个文件，覆盖前留底 %d 个"
-                      % (st["restored"], st["backed_up"]))
+            self._log("还原完成：写入 %d 个文件；还原前已备份当前档位 %d 个文件"
+                      % (st["restored"], st.get("pre_files", 0)))
             self._prune(g)
             self._set_busy(False)
             self.refresh_all()
-            msgbox.done(self, "回滚完成",
-                                    "已还原 %d 个文件（%s）。\n%d 个被覆盖的文件已留底在 "
-                                    "localcopies/ 目录。" % (st["restored"],
-                                                         _human(st["bytes"]), st["backed_up"]))
+            tip = ("当前档位已完整备份成「还原前备份」快照（%d 个文件）。\n"
+                   "想退回操作前的状态，到「历史版本」里选中它再还原一次即可。"
+                   % st.get("pre_files", 0)
+                   if st.get("pre_snapshot") else
+                   "还原前当前档位是空的，没有需要备份的内容。")
+            msgbox.done(self, "还原完成",
+                        "已写入 %d 个文件（%s）。\n\n%s"
+                        % (st["restored"], _human(st["bytes"]), tip))
 
         run_async(job, on_result=done, on_progress=self._on_progress,
                   on_error=lambda e: self._op_error(e))
