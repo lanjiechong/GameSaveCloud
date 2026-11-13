@@ -419,5 +419,28 @@ def top_files(p: str) -> set:
         return set()
 
 
+def installed_game_names() -> set:
+    """本机 Steam / Epic 清单里的游戏名，宽松归一化后返回。
+
+    给扫描器做游戏身份验证用：AppData\\Roaming 下的目录只有对得上
+    已安装游戏，才允许当成存档目录报告。纯离线、不联网、不读注册表。
+    """
+    out = set()
+    for lib in steam_libraries():
+        for fn in _safe_listdir(lib):
+            if not (fn.lower().startswith("appmanifest_")
+                    and fn.lower().endswith(".acf")):
+                continue
+            fields = dict(_kv_lines(_read_text(os.path.join(lib, fn))))
+            n = norm_loose(fields.get("name") or "")
+            if n:
+                out.add(n)
+    for m in epic_manifests():
+        n = norm_loose(m.get("display_name") or "")
+        if n:
+            out.add(n)
+    return out
+
+
 def is_windows() -> bool:
     return sys.platform.startswith("win")

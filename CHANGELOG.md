@@ -3,6 +3,42 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.5.2] - 2026-11-13
+
+要求把 ACLOS 加速器直接排除，且「以后都不能出现这种加速器扫描出来的情况，
+只能扫描游戏」。逐个往黑名单里加名字解决不了，这一版换判据。
+
+### 根因
+
+ACLOS 唯一命中的是 `GameProxyCrashReports\xxx.run.lock`——一个 **0 字节**
+文件：`SAVE_HINTS` 里有 `".run"`，而 `_looks_like_save_dir` 不检查大小。
+整个目录其实是 Electron 应用数据（`Local State` / `Cookies` / `Code Cache`
+/ `IndexedDB` / `Cache\data_*`），跟存档毫无关系。
+
+### 修复：启发式必须证明「这是游戏」
+
+- **整类排除 Electron**：`_is_app_data_dir` 命中 ≥2 项 Chromium 特征即否决。
+  加速器、启动器、聊天工具是同一类，不再逐个拉黑。
+- **0 字节文件不算存档证据**；`SAVE_HINTS` 删掉 `".run"`。
+- **按根分级可信度**：`LocalLow` / `My Games` / `Saved Games` 是游戏专用根，
+  天然可信；`AppData\Roaming` 是低可信根，目录名必须对得上本机 Steam/Epic
+  清单或随包离线索引，或现场有 Unity `Player.log`。
+- `launcher.installed_game_names()`（新）：离线读 Steam `appmanifest_*.acf`
+  与 Epic `*.item` 里的游戏名，供身份验证使用，不联网、不读注册表。
+- `NOISE` 额外加 `aclos` 作双保险；查表条目不受启发式规则约束
+  （本来就人工确认过）。
+
+### 结果
+
+实测 16 → **15 条，只少了 ACLOS，其余真游戏一条没漏**。
+单测 165 → 173（新增 8 条身份判定），冒烟全过。
+
+### 边界
+
+不是数学意义上的 100%：一个刻意伪装成 Unity 目录的软件仍可能混进来。
+另外再明确一次——**扫描不是全盘**，只覆盖 7 类游戏存档常见根，
+安装目录默认不扫。
+
 ## [1.5.1] - 2026-11-13
 
 ### 新增
@@ -310,6 +346,7 @@
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.5.2]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.2
 [1.5.1]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.1
 [1.5.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.0
 [1.4.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.4.0

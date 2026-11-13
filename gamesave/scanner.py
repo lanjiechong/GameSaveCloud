@@ -228,8 +228,10 @@ SAVE_HINTS = (
     "save", "saves", "slot", "profile", "profiles", "progress", "checkpoint",
     "userdata", "gamedata", "worlds", "characters", "campaign",
     ".sav", ".save", ".savegame", ".rpgsave", ".sl2", ".sps", ".ibg",
-    ".es3", ".run", ".dat.sav", ".sav.dat",
+    ".es3", ".dat.sav", ".sav.dat",
 )
+# 注意：不要放 ".run" 这种宽泛后缀。ACLOS 加速器目录里有个 0 字节的
+# GameProxyCrashReports\xxx.run.lock，就靠它把整个加速器误报成了游戏。
 # 明确的噪声目录，命中即跳过
 NOISE = (
     "cache", "caches", "log", "logs", "crash", "crashes", "crashreportclient",
@@ -261,7 +263,7 @@ NOISE = (
     "securecrt", "mobaXterm", "putty", "vmware", "virtualbox", "hyper-v",
     "sandboxie", "magpie", "lossless", "wallpaper", "rainmeter",
     "translucent", "fences", "rocketdock", "startallback", "explorerpatcher",
-    "chameleon", "bypass", "aclog", "acsdkinslog", "nrc", "camera bits",
+    "chameleon", "bypass", "aclog", "acsdkinslog", "aclos", "nrc", "camera bits",
     "playerkit", "fabplugins", "gameviewer", "gamepp", "gamesave", "farm",
     "programs", "publishers", "edge", "iexplore", "outlook", "teams",
     "skype", "zoom", "meeting", "voov", "xsplit", "streamlabs",
@@ -315,7 +317,11 @@ def _dir_file_count(path: str, max_files: int = 2000) -> tuple:
 
 
 def _looks_like_save_dir(path: str, max_files: int = 400) -> tuple:
-    """返回 (文件数, 总字节)。只统计命中强存档特征的文件，纯噪声目录返回 0。"""
+    """返回 (文件数, 总字节)。只统计命中强存档特征的**非空**文件。
+
+    0 字节的 .lock / 占位文件不算证据 —— 应用会成批造这种文件，
+    拿它当存档特征，任何软件都能被报成游戏。
+    """
     n = 0
     total = 0
     try:
@@ -326,15 +332,89 @@ def _looks_like_save_dir(path: str, max_files: int = 400) -> tuple:
                 if not any(h in low for h in SAVE_HINTS):
                     continue
                 try:
-                    total += os.path.getsize(os.path.join(r, f))
-                    n += 1
+                    sz = os.path.getsize(os.path.join(r, f))
                 except OSError:
-                    pass
+                    continue
+                if sz <= 0:
+                    continue
+                total += sz
+                n += 1
                 if n > max_files:
                     return n, total
     except OSError:
         return 0, 0
     return n, total
+
+
+# ---------------------------------------------------------------
+# 游戏身份验证：只凭「文件名像存档」不够，必须证明这是游戏
+# ---------------------------------------------------------------
+APP_DATA_MARKERS = (
+    "local state", "network persistent state", "cookies", "cookies-journal",
+    "preferences", "code cache", "indexeddb", "local storage",
+    "blob_storage", "session storage", "quotamanager",
+)
+
+
+def _is_app_data_dir(path: str) -> bool:
+    """Electron / Chromium 应用数据目录特征，命中 ≥2 项即判定不是游戏。
+
+    加速器、启动器、聊天工具几乎全是 Electron，靠这一组特征整类排除，
+    不必每冒出一个就往黑名单里加名字。真游戏存档目录不会同时摆着
+    Local State + Cookies + Code Cache + IndexedDB 这些东西。
+    """
+    try:
+        names = {n.lower() for n in os.listdir(path)}
+    except OSError:
+        return False
+    hit = sum(1 for m in APP_DATA_MARKERS if m in names)
+    cache = os.path.join(path, "Cache")
+    if os.path.isdir(cache):
+        try:
+            if any(n.startswith("data_") for n in os.listdir(cache)):
+                hit += 2
+        except OSError:
+            pass
+    return hit >= 2
+
+
+def _has_game_runtime(path: str) -> bool:
+    """Unity 游戏在存档目录旁边会留 Player.log。"""
+    try:
+        names = {n.lower() for n in os.listdir(path)}
+    except OSError:
+        return False
+    return bool(names & {"player.log", "player-prev.log"})
+
+
+def _loose(s: str) -> str:
+    return "".join(ch for ch in (s or "").lower() if ch.isalnum())
+
+
+def _game_catalog() -> set:
+    """已安装游戏 + 随包离线索引里的名字，全部归一化。纯本地，不联网。"""
+    out = set()
+    try:
+        from . import launcher, gameindex
+        out |= launcher.installed_game_names()
+        for row in gameindex.entries():
+            for k in ("name_en", "name_zh", "name"):
+                n = _loose(row.get(k) or "")
+                if n:
+                    out.add(n)
+    except Exception:
+        pass                      # 索引缺失不该让整个扫描失败
+    return out
+
+
+def _confirmed_game(name: str, catalog: set) -> bool:
+    n = _loose(name)
+    if len(n) < 4:
+        return False
+    if n in catalog:
+        return True
+    # 存档目录名常是官方名的一截（HogwartsLegacy / SplitFiction）
+    return any(len(c) >= 6 and (n in c or c in n) for c in catalog)
 
 
 class FoundGame:
@@ -403,11 +483,19 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
                     except OSError:
                         pass
 
-    # ---------- 2. 启发式：只用强存档特征，且只扫游戏专属根 ----------
+    # ---------- 2. 启发式：先证明「这是游戏」，再看有没有存档 ----------
     if heuristic:
+        catalog = _game_catalog()
         for root, tag, heur in _roots():
             if not heur:
                 continue
+            # LocalLow 是 Unity 专用的 <工作室>\<游戏> 布局，
+            # Documents\Saved Games / My Games 是系统留给游戏的目录 ——
+            # 这些根天然可信。AppData\Roaming 里塞的都是普通软件，
+            # 目录名必须对得上已安装游戏，或现场有游戏运行时证据。
+            rl = root.lower()
+            trusted = (_is_locallow(root) or "saved games" in rl
+                       or "my games" in rl)
             try:
                 entries = sorted(os.listdir(root))
             except OSError:
@@ -416,7 +504,10 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
                 if _is_noise_dir(name):
                     continue
                 p = os.path.join(root, name)
-                if not os.path.isdir(p):
+                if not os.path.isdir(p) or _is_app_data_dir(p):
+                    continue
+                if not trusted and not (_confirmed_game(name, catalog)
+                                       or _has_game_runtime(p)):
                     continue
                 # LocalLow 的布局是 <工作室>\<游戏>。工作室那一层不是游戏名 ——
                 # 拿「AIHASTO」「House House」去 Steam 搜一条都搜不到，
@@ -434,7 +525,7 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
                         if _is_noise_dir(sub):
                             continue
                         sp = os.path.join(p, sub)
-                        if not os.path.isdir(sp):
+                        if not os.path.isdir(sp) or _is_app_data_dir(sp):
                             continue
                         f2, s2 = _looks_like_save_dir(sp, max_files=60)
                         if f2:

@@ -1817,7 +1817,8 @@ class TestScannerDiscovery(unittest.TestCase):
     def _scan(self, known=None):
         with mock.patch.object(scanner, "_roots",
                                return_value=[(self.low, "Windows", True)]), \
-                mock.patch.object(scanner, "KNOWN_GAMES", []):
+                mock.patch.object(scanner, "KNOWN_GAMES", []), \
+                mock.patch.object(scanner, "_game_catalog", return_value=set()):
             return scanner.scan(known_paths=known)
 
     def test_noise_prefix_does_not_kill_studio_names(self):
@@ -1864,6 +1865,84 @@ class TestScannerDiscovery(unittest.TestCase):
         found = self._scan(known=[self.saves])
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0].already_added)
+
+
+# ==================================================================
+# 13. 启发式必须证明「这是游戏」，普通软件一律不报
+# ==================================================================
+class TestGameIdentity(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gsc_id_")
+        # 故意不叫 LocalLow / Saved Games —— 低可信根，规则最严
+        self.roam = os.path.join(self.tmp, "Roaming")
+        os.makedirs(self.roam)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _scan(self, root=None, catalog=None):
+        root = root or self.roam
+        with mock.patch.object(scanner, "_roots",
+                               return_value=[(root, "Windows", True)]), \
+                mock.patch.object(scanner, "KNOWN_GAMES", []), \
+                mock.patch.object(scanner, "_game_catalog",
+                                  return_value=catalog or set()):
+            return scanner.scan(known_paths=[])
+
+    def test_aclos_in_noise(self):
+        self.assertTrue(scanner._is_noise_dir("ACLOS"))
+
+    def test_electron_app_rejected_even_when_name_in_catalog(self):
+        """名字对上了也没用：Electron 特征直接否决。"""
+        d = os.path.join(self.roam, "SomeBooster")
+        os.makedirs(d)
+        for n in ("Local State", "Cookies", "Preferences", "Code Cache"):
+            write(os.path.join(d, n), b"")
+        write(os.path.join(d, "save.json"), b"x" * 100)
+        self.assertEqual(self._scan(catalog={"somebooster"}), [])
+
+    def test_unknown_app_with_save_file_rejected(self):
+        d = os.path.join(self.roam, "WhateverTool")
+        os.makedirs(d)
+        write(os.path.join(d, "save.json"), b"x" * 100)
+        self.assertEqual(self._scan(), [])
+
+    def test_zero_byte_save_placeholder_is_not_evidence(self):
+        d = os.path.join(self.roam, "RealGame")
+        os.makedirs(d)
+        write(os.path.join(d, "Player.log"), b"log")
+        write(os.path.join(d, "save.json"), b"")
+        self.assertEqual(self._scan(), [])
+
+    def test_catalog_match_is_allowed(self):
+        d = os.path.join(self.roam, "RealGame")
+        os.makedirs(d)
+        write(os.path.join(d, "save.sav"), b"x" * 100)
+        self.assertEqual(len(self._scan(catalog={"realgame"})), 1)
+
+    def test_unity_log_is_allowed_without_catalog(self):
+        d = os.path.join(self.roam, "UnityIndie")
+        os.makedirs(d)
+        write(os.path.join(d, "Player.log"), b"log")
+        write(os.path.join(d, "save.sav"), b"x" * 100)
+        self.assertEqual(len(self._scan()), 1)
+
+    def test_locallow_is_trusted_without_catalog(self):
+        """LocalLow 是 Unity 专用布局，不能因为没进清单就漏掉独立游戏。"""
+        low = os.path.join(self.tmp, "LocalLow")
+        g = os.path.join(low, "TeamSoda", "Duckov")
+        os.makedirs(g)
+        write(os.path.join(g, "Save_1.sav"), b"x" * 100)
+        out = self._scan(root=low)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].name, "Duckov")
+
+    def test_game_runtime_detects_unity(self):
+        d = os.path.join(self.roam, "UnityGame")
+        os.makedirs(d)
+        self.assertFalse(scanner._has_game_runtime(d))
+        write(os.path.join(d, "Player.log"), b"log")
+        self.assertTrue(scanner._has_game_runtime(d))
 
 
 if __name__ == "__main__":

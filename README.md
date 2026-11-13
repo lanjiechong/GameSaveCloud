@@ -5,7 +5,7 @@
 
 约 6200 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
 
-**当前版本 v1.5.1** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
+**当前版本 v1.5.2** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -68,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 165 个核心引擎单元测试
+python tests/test_core.py                                # 173 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -421,12 +421,19 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 绝不会出现「半个文件被当成有效 chunk」。这一条配合 `store.verify()`
 （解压后重新哈希比对）构成最后一道防线。
 
-### 6.6 扫描器要降噪
+### 6.6 扫描范围与降噪
+
+**不是全盘扫描。** `_roots()` 只列游戏存档的常见根：
+`AppData\Local` / `LocalLow` / `Roaming`、`ProgramData`、
+`Documents\My Games` / `Saved Games`、`Steam\userdata`。
+其中只有 `LocalLow`、`Roaming`、`My Games`、`Saved Games` 参与启发式，
+其余只供已知游戏查表定位。安装目录（例如 `C:\Soft\...`）默认不扫，
+需要时用「添加自定义」手动指定。
 
 第一版扫描器在普通用户机器上报了 **203 条**「疑似存档」，
 里面混着 AMD 驱动、剪映、BitComet、网易云音乐……
 
-降噪三条：
+降噪四条：
 
 1. `AppData\Local` 与 `ProgramData` 被普通软件大量占据，**不参与启发式扫描**
    （已知游戏查表仍然覆盖它们）；
@@ -439,8 +446,22 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
      原来整个名单都用 `startswith`，`teams`（本意排除 Microsoft Teams）
      把 Unity 工作室 `TeamSoda` 一起杀掉，逃离鸭科夫的真实存档
      `LocalLow\TeamSoda\Duckov\Saves` 就此整个漏掉。
+4. **启发式必须证明「这是游戏」**，只有像存档的文件名不够：
+   - Electron / Chromium 应用特征（`Local State`、`Cookies`、
+     `Code Cache`、`IndexedDB`、`Cache\data_*`…）命中 ≥2 项直接否决。
+     加速器、启动器、聊天工具是同一类，整类排除而不是逐个拉黑；
+   - 0 字节文件不算证据 —— ACLOS 加速器就是靠一个 0 B 的
+     `GameProxyCrashReports\xxx.run.lock` 混进来的；
+   - `LocalLow`、`Documents\My Games` / `Saved Games` 是游戏专用根，
+     天然可信；
+   - `AppData\Roaming` 是低可信根，目录名必须对得上本机 Steam/Epic
+     清单或随包离线索引，或现场有 Unity `Player.log`。
 
-结果：203 → 22 → **16 条，且全部为真实存档目录**。
+结果：203 → 22 → 16 → **15 条，全部为真实游戏存档目录**。
+
+这套判据覆盖整类 Electron 应用，但做不到数学意义上的 100%：
+一个刻意伪装成 Unity 游戏目录的软件仍可能混进来，遇到直接移除即可。
+查表条目不受启发式规则约束 —— 它们本来就是人工确认过的游戏。
 
 已添加过的目录**照样列出**，只是灰显并标「已添加」，不再凭空消失；
 列表项带图标（已添加的游戏用按 game_id 存过的真图标，新游戏用自绘配色图）。
@@ -469,7 +490,7 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 ## 8. 测试
 
 ```bash
-python tests/test_core.py                  # 165 个单元测试
+python tests/test_core.py                  # 173 个单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 ```
 
@@ -913,6 +934,6 @@ Python 运行时为 PSF）的完整声明、动态链接合规说明与 Qt 可�
 **关于 AI 辅助开发的说明**：本项目在开发过程中使用了 AI 编程助手
 参与代码编写与问题排查。需求取舍、架构设计、安全模型（留底机制、
 三方合并基准、内容哈希判定等）与最终代码均由人类作者审阅、测试并负责；
-全部核心行为由 `tests/test_core.py` 的 165 个单元测试钉住。如发现任何
+全部核心行为由 `tests/test_core.py` 的 173 个单元测试钉住。如发现任何
 疑似侵权内容，请在 [Issues](https://github.com/lanjiechong/GameSaveCloud/issues)
 反馈，核实后立即处理。
