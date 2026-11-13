@@ -387,7 +387,11 @@ def candidate_save_dirs(name: str, snapshot_rel_paths=()) -> list:
                                      for s in _safe_listdir(p)):
                 if not os.path.isdir(cand):
                     continue
-                if name and norm_loose(name) not in norm_loose(cand):
+                # 名字要能对上：双向包含都算。
+                # 以前只判 name in cand，遇到「米塔 MiSide」对目录 MiSide
+                # 就永远不匹配（组合名比目录名长），候选层形同虚设。
+                n1, n2 = norm_loose(name), norm_loose(cand)
+                if n1 and n2 and n1 not in n2 and n2 not in n1:
                     continue
                 if want and not (want & top_files(cand)):
                     continue

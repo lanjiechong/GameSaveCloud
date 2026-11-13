@@ -80,8 +80,16 @@ class ConfirmDialog(QDialog):
         self.accept()
 
     @staticmethod
-    def ask(title, warning, detail="", require_check=False, parent=None) -> bool:
-        d = ConfirmDialog(title, warning, detail, require_check, parent)
+    def ask(title, warning, detail="", require_check=False, parent=None,
+            check_text="我已了解上述后果，仍要继续") -> bool:
+        # 这里必须全部走关键字。以前写的是
+        #     ConfirmDialog(title, warning, detail, require_check, parent)
+        # 而构造函数的第 5 个形参是 check_text —— parent 被当成复选框文字，
+        # 结果确认框的复选框没有文字、对话框也没有父窗口（不居中于主窗、
+        # 不随主窗关闭）。关键字调用把这类错位一次性堵死。
+        d = ConfirmDialog(title, warning, detail,
+                          require_check=require_check,
+                          check_text=check_text, parent=parent)
         return d.exec() == QDialog.Accepted
 
 
@@ -589,10 +597,11 @@ class SettingsDialog(QDialog):
         c.set("schedule.enabled", self.sched_on.isChecked())
         c.set("schedule.interval_minutes", self.sched_min.value())
         c.set("schedule.silent", self.sched_silent.isChecked())
-        # 开机自启：同步 HKCU Run 项；非 Windows 平台 set_enabled 返回 False
+        # 开机自启：同步 HKCU Run 项；非 Windows 平台 set_enabled 返回 False。
+        # 注意不能写 `want and self._apply_autostart(want)` —— want 为 False 时
+        # 短路，根本不会调用 set_enabled(False)，取消勾选也删不掉注册表项。
         want_autostart = self.autostart.isChecked()
-        c.set("schedule.autostart",
-              want_autostart and self._apply_autostart(want_autostart))
+        c.set("schedule.autostart", self._apply_autostart(want_autostart))
         c.set("safety.keep_local_copy", self.keep_copy.isChecked())
         c.set("safety.keep_snapshots", self.keep_snaps.value())
         c.set("safety.confirm_dangerous", self.confirm_danger.isChecked())
@@ -651,7 +660,8 @@ class AboutDialog(QDialog):
             "· 备份引擎：分块 + zstd 压缩 + 内容寻址去重\n"
             "· 冲突处理：keep_local / use_remote / save_both 三种策略\n"
             "· 调度：定时备份、托盘常驻、开机自启可选\n"
-            "· 游戏图标：内置 Steam 周销量榜 Top100 真实 logo 包，离线可用")
+            "· 图标：内置 Top100 离线索引（名称 + 图标地址），"
+            "图标在运行时从 Steam CDN 获取，发布包不含第三方商标素材")
         lay.addWidget(box)
 
         info = QLabel("作者：%s" % AUTHOR)

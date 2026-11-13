@@ -27,8 +27,12 @@ from . import launcher
 
 
 def missing_roots(game) -> list:
-    """返回已经不存在的存档目录。"""
-    return [p for p in (game.paths or []) if not os.path.isdir(p)]
+    """返回已经不存在的存档目录。
+
+    用 exists 而不是 isdir：存档目标允许是单个文件（查表里有这种条目），
+    文件还在就不该报「目录不存在」。
+    """
+    return [p for p in (game.paths or []) if not os.path.exists(p)]
 
 
 def snapshot_filenames(vault, game_id: str, limit: int = 40) -> list:

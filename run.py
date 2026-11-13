@@ -88,8 +88,19 @@ def _cli(argv):
             print("    已裁剪旧快照：本地 %d / 云端 %d（保留最近 %d 版）"
                   % (n, nr, keep))
 
+    def paths_gone(g):
+        """所有存档目录都不在了 —— 备份只会得到空快照，跳过。
+
+        与界面里的 _all_roots_gone 保持同一判据：路径列表为空也算
+        「没得备份」，别为一个配置坏掉的条目留一份空快照。
+        """
+        return not any(os.path.exists(p) for p in (g.paths or ()))
+
     def backup_all():
         for g in vault.list_games():
+            if paths_gone(g):
+                print("%-28s 跳过：存档目录不存在（先找回存档）" % g.name)
+                continue
             s = vault.create_snapshot(g, kind="auto", note="CLI 备份")
             print("%-28s %d 文件 %s" % (g.name, len(s.files), _h(s.total_size)))
             prune(g)

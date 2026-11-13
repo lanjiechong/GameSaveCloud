@@ -188,6 +188,23 @@ class SyncEngine:
     # ==========================================================
     def plan(self, game: Game) -> SyncPlan:
         p = SyncPlan(game_id=game.id, game_name=game.name)
+        if not game.paths:
+            p.error = "这款游戏没有配置存档目录，已跳过同步"
+            return p
+        # 「存档目录不存在」必须先拦住。此时本地扫出来少了一部分，三方合并
+        # 会把「本地没有」误判成「用户删了档」—— 对缺失目录下的每个文件
+        # 都判成 del_local，把云端版本一起删掉。卸载、换盘、外接硬盘没插
+        # 都会走到这个状态。
+        #
+        # 只要有任何一个根缺失就整体跳过，不做「只同步还存在的那个根」：
+        # 少一个根的本地视图是不完整的，据此算出来的增删都不可信。
+        gone = [x for x in (game.paths or []) if not os.path.exists(x)]
+        if gone:
+            p.error = ("%d 个存档目录不存在，已跳过同步：%s\n"
+                       "无法判断是「删了存档」还是「盘没插 / 换位置了」。"
+                       "请先点「找回存档」，或确认游戏确实不需要这个目录。"
+                       % (len(gone), "、".join(gone)))
+            return p
         try:
             local_list = self.vault.scan_local(game)
         except Exception as e:
@@ -296,6 +313,12 @@ class SyncEngine:
         """
         res = {"uploaded": 0, "downloaded": 0, "conflicts": 0,
                "bytes": 0, "errors": [], "snapshot": None}
+
+        # 计划阶段已经判定不能同步（存档目录不存在 / 扫不动），
+        # 绝不能再往下走：往下走只会重建幽灵目录或把空本地推成「删档」。
+        if plan.error:
+            res["errors"].append(plan.error)
+            return res
 
         # 1. 应用冲突裁决
         for c in plan.conflicts:
@@ -412,12 +435,22 @@ class SyncEngine:
         res["snapshot"] = snap
 
         # 5. 把「下载」和「另存的云端版本」写到游戏目录（覆盖前留底）
+        blocked = []
         for a in plan.actions:
             if a.action == ACT_DOWNLOAD and a.remote:
-                self._materialize(game, a.remote, a.path)
+                if not self._materialize(game, a.remote, a.path):
+                    blocked.append(a.path)
             elif a.conflict_copy_path and a.remote:
-                self._materialize(game, a.remote, a.conflict_copy_path,
-                                  note="云端冲突版本")
+                if not self._materialize(game, a.remote, a.conflict_copy_path,
+                                         note="云端冲突版本"):
+                    blocked.append(a.conflict_copy_path)
+        if blocked:
+            # 根目录在计划之后被拔掉/改名（外接盘）时仍可能走到这里。
+            # 不推进基准，下次重试；绝不 os.makedirs 出幽灵目录。
+            res["errors"].append(
+                "存档目录不存在，%d 个文件未写入：%s"
+                % (len(blocked), "、".join(blocked[:5])))
+            return res
 
         # 6. 本地删除（云端已删的文件）—— 同样先留底
         for a in plan.actions:
@@ -429,24 +462,43 @@ class SyncEngine:
         return res
 
     # ---------- 落盘辅助 ----------
+    @staticmethod
+    def _root_for(game: Game, rel_path: str) -> str:
+        """相对路径归属的存档根。与 _resolve 同源，但先于安全校验取根。"""
+        roots = game.paths or []
+        if not roots:
+            return ""
+        if len(roots) == 1:
+            return roots[0]
+        parts = (rel_path or "").split("/", 1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            return ""
+        idx = int(parts[0])
+        return roots[idx] if idx < len(roots) else ""
+
     def _resolve(self, game: Game, rel_path: str):
         """快照路径 → 本地真实路径。陈旧序号返回 None（跳过）；
         越界路径抛 UnsafePathError（中止本次同步，不推进 base）。"""
-        roots = game.paths
-        if len(roots) == 1:
-            return safe_join(roots[0], rel_path)
-        parts = rel_path.split("/", 1)
-        if len(parts) != 2 or not parts[0].isdigit():
+        root = self._root_for(game, rel_path)
+        if not root:
             return None
-        idx = int(parts[0])
-        if idx >= len(roots):
-            return None
-        return safe_join(roots[idx], parts[1])
+        if len(game.paths) == 1:
+            return safe_join(root, rel_path)
+        return safe_join(root, rel_path.split("/", 1)[1])
 
-    def _materialize(self, game: Game, entry: FileEntry, rel_path: str, note=""):
+    def _materialize(self, game: Game, entry: FileEntry, rel_path: str,
+                     note="") -> bool:
+        """把云端条目写到本地。根目录不存在时返回 False，不创建任何目录。
+
+        只有「根目录确实存在、只是子目录还没建」才 makedirs —— 换盘后
+        旧路径已经不存在时，写进去的内容游戏读不到，等于白同步。
+        """
+        root = self._root_for(game, rel_path)
+        if not root or not os.path.isdir(root):
+            return False
         dst = self._resolve(game, rel_path)
         if dst is None:
-            return
+            return False
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         if os.path.isfile(dst):
             self.vault._backup_existing(game.id, rel_path, dst,
@@ -454,11 +506,16 @@ class SyncEngine:
         with open(dst, "wb") as out:
             for c in entry.chunks:
                 out.write(self.vault.store.read_decompressed(c.sha256))
+        return True
 
-    def _delete_local(self, game: Game, rel_path: str):
+    def _delete_local(self, game: Game, rel_path: str) -> bool:
+        root = self._root_for(game, rel_path)
+        if not root or not os.path.isdir(root):
+            return False
         dst = self._resolve(game, rel_path)
         if dst is None:
-            return
+            return False
         if os.path.isfile(dst):
             self.vault._backup_existing(game.id, rel_path, dst, reason="sync-delete")
             os.remove(dst)
+        return True

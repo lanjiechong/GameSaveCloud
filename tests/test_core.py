@@ -276,6 +276,18 @@ class BaseSyncTest(unittest.TestCase):
         return os.listdir(os.path.join(self.vault.root, "localcopies"))
 
 
+class TestFindByName(BaseSyncTest):
+    """同名记录有活动也有已移除时，find_by_name 必须优先返回活动的。"""
+
+    def test_active_record_wins_over_removed_one(self):
+        removed = Game(id="oldid0000000000", name="FakeGame",
+                       paths=[self.save_dir], removed_at=time.time())
+        self.vault.save_game(removed)
+        self.assertEqual(self.vault.find_by_name("FakeGame").id, self.game.id)
+        self.assertEqual(self.vault.find_by_name(
+            "FakeGame", only_removed=True).id, removed.id)
+
+
 class TestPruning(BaseSyncTest):
     def test_prune_keeps_recent_n(self):
         for i in range(6):
@@ -1831,6 +1843,32 @@ class TestScannerDiscovery(unittest.TestCase):
         self.assertTrue(scanner._is_noise_dir("gamesir_connect"))
         self.assertTrue(scanner._is_noise_dir("CrashReportClient"))
 
+    def test_noise_prefix_does_not_kill_real_game_names(self):
+        """`crash` / `temp` / `log` 这种三字母前缀会把真游戏整目录踢掉。
+
+        Crashlands 的存档在 LocalLow\\Butterscotch Shenanigans\\Crashlands，
+        Tempest、Logical 同理。扫描器宁可留下噪音，也不能漏游戏。
+        """
+        for name in ("Crashlands", "Tempest", "Logical", "Logitech", "Temtem"):
+            self.assertFalse(scanner._is_noise_dir(name), name)
+        # 真正该排除的仍然排除
+        for name in ("CrashDumps", "Crashpad", "TempFolder", "Logs", "CacheData"):
+            self.assertTrue(scanner._is_noise_dir(name), name)
+
+    def test_saved_games_standard_location_is_scanned(self):
+        """Saved Games 的标准位置是 %USERPROFILE%\\Saved Games。
+
+        早期只扫了「文档\\Saved Games」，用系统 Known Folder 存盘的游戏
+        整个漏掉。这里把 isdir 全部打桩成 True，检查两个位置都在根列表里。
+        """
+        home = os.path.expanduser("~")
+        expect = os.path.join(home, "Saved Games")
+        with mock.patch.object(scanner.os.path, "isdir", return_value=True):
+            roots = [r[0] for r in scanner._roots()]
+        self.assertIn(expect, roots)
+        self.assertIn(os.path.join(scanner._documents_dirs()[0], "Saved Games"),
+                      roots)
+
     def test_locallow_anchor_not_swallowed_by_local(self):
         low = scanner._resolve_anchor("X", r"AppData\LocalLow")
         expect = os.path.normpath(os.path.join(
@@ -2013,6 +2051,137 @@ class TestStrictMode(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0].source, "known")
         self.assertTrue(os.path.isdir(p))
+
+
+# ==================================================================
+# 15. 同步：存档目录不存在时一个字都不许写（幽灵目录回归）
+# ==================================================================
+class TestSyncMissingRoots(unittest.TestCase):
+    """卸载游戏 / 换盘后，本地目录不存在，云端还有档。
+
+    基准丢失（换机器、清过状态）时，三方合并会把「本地没有」判成
+    「本地没改动 → 下载」，然后把云端文件写回一个已经不存在的位置，
+    还报同步成功。游戏读的是新路径，等于白同步，还多出一堆幽灵目录。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gsc_missing_")
+        self.save = os.path.join(self.tmp, "Saves")
+        os.makedirs(self.save)
+        write(os.path.join(self.save, "slot1.sav"), b"save-1")
+        self.vault = Vault(os.path.join(self.tmp, "vault"))
+        self.remote = LocalFolderBackend(os.path.join(self.tmp, "remote"))
+        self.game = self.vault.add_game("GhostGame", [self.save])
+        snap = self.vault.create_snapshot(self.game)
+        self.remote.put_snapshot(snap)
+        # 丢掉同步基准：模拟换机器 / 状态被清
+        self.vault.db.execute("DELETE FROM sync_state")
+        self.vault.db.commit()
+        shutil.rmtree(self.save)
+        self.engine = SyncEngine(self.vault, self.remote, cloud_on=True)
+
+    def tearDown(self):
+        self.vault.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_plan_refuses_when_all_roots_gone(self):
+        p = self.engine.plan(self.game)
+        self.assertTrue(p.error, "目录不存在却没有报错")
+        self.assertEqual(p.actions, [])
+        self.assertIn("存档目录不存在", p.error)
+
+    def test_execute_does_not_recreate_missing_dir(self):
+        p = self.engine.plan(self.game)
+        r = self.engine.execute(self.game, p, {})
+        self.assertTrue(r["errors"])
+        self.assertFalse(os.path.exists(self.save),
+                         "同步把幽灵目录建出来了：%s" % self.save)
+
+    def test_materialize_refuses_when_root_missing(self):
+        snap = self.remote.list_snapshots(self.game.id)[0]
+        entry = snap.files[0]
+        self.assertFalse(self.engine._materialize(self.game, entry, entry.path))
+        self.assertFalse(os.path.exists(self.save))
+
+    def test_partial_missing_root_also_blocks(self):
+        """两个存档目录只丢一个，也不能同步。
+
+        少一个根的本地视图是不完整的：缺失根下的文件会被判成
+        「本地已删除 → 云端也删」，把云端版本一起抹掉。
+        """
+        second = os.path.join(self.tmp, "Second")
+        os.makedirs(second)
+        write(os.path.join(second, "b.sav"), b"save-2")
+        os.makedirs(self.save, exist_ok=True)
+        write(os.path.join(self.save, "slot1.sav"), b"save-1")
+        self.vault.update_paths(self.game.id, [self.save, second])
+        self.game.paths = [self.save, second]
+        snap = self.vault.create_snapshot(self.game)
+        self.remote.put_snapshot(snap)
+        self.vault.set_sync_state(self.game.id, base_snapshot_id=snap.id)
+        shutil.rmtree(second)
+        p = self.engine.plan(self.game)
+        self.assertTrue(p.error)
+        self.assertIn("存档目录不存在", p.error)
+        self.assertEqual(p.actions, [])
+
+    def test_status_reports_error_instead_of_silent_success(self):
+        st = self.engine.status(self.game)
+        self.assertEqual(st.state, SYNC_ERROR)
+        self.assertIn("存档目录不存在", st.message)
+
+
+# ==================================================================
+# 16. WebDAV：宁可整块重传，也不能把半截 chunk 当成「已存在」
+# ==================================================================
+class TestWebDAVChunkSafety(unittest.TestCase):
+    def setUp(self):
+        from gamesave.remote import WebDAVBackend
+        self.tmp = tempfile.mkdtemp(prefix="gsc_dav_")
+        self.dav = WebDAVBackend("https://dav.example.com/base", "u", "p")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_partial_remote_chunk_is_uploaded_whole(self):
+        """云端有半截（大小不等于 blob）时必须整块 PUT，不能用 Range 追加。
+
+        多数 WebDAV 服务器不支持 Content-Range 写入：它们会把文件覆盖成
+        「只有尾部这段」，而 HEAD 只看得到大小，下次同步就误判已存在，
+        坏块永远修不好。
+        """
+        calls = []
+        self.dav._chunk_head_size = lambda sha: 100       # 云端只有半截
+        self.dav._req = lambda method, url, data=None, headers=None, stream=False: (
+            calls.append((method, len(data or b""), headers)) or mock.MagicMock())
+        blob = b"x" * 500
+        self.assertTrue(self.dav.upload_chunk("a" * 64, blob))
+        self.assertEqual(calls, [("PUT", 500, None)])
+
+    def test_same_size_is_skipped(self):
+        calls = []
+        self.dav._chunk_head_size = lambda sha: 500
+        self.dav._req = lambda *a, **k: calls.append(a)
+        self.assertFalse(self.dav.upload_chunk("a" * 64, b"x" * 500))
+        self.assertEqual(calls, [])
+
+    def test_download_does_not_append_when_server_ignores_range(self):
+        """服务器回 200 全量时，不能把内容 append 到已有的 .part 后面。"""
+        dst = os.path.join(self.tmp, "chunk")
+        write(dst + ".part", b"OLD-")
+
+        class Resp:
+            status = 200
+
+            def read(self, n=-1):
+                if getattr(self, "_done", False):
+                    return b""
+                self._done = True
+                return b"FULL"
+
+        self.dav._req = lambda *a, **k: Resp()
+        self.dav.download_chunk("a" * 64, dst)
+        self.assertEqual(read(dst), b"FULL")
 
 
 if __name__ == "__main__":

@@ -23,31 +23,59 @@ from .models import Game
 #   AppData\Local 与 ProgramData 被绝大多数普通软件占用，
 #   在那里做启发式扫描只会得到一堆应用数据目录，所以不扫。
 # ---------------------------------------------------------------
+def _documents_dirs() -> list:
+    """「文档」的真实位置。中文 Windows / OneDrive 重定向都要照顾到。
+
+    `%USERPROFILE%\\Documents` 只在没改过「文档」位置时成立。开了 OneDrive
+    备份的用户，文档实际在 `%USERPROFILE%\\OneDrive\\Documents`；
+    这时只认前者会让所有「我的游戏 / 文档下存档」的游戏全部漏掉。
+    """
+    home = os.path.expanduser("~")
+    out = []
+    for p in (os.path.join(home, "Documents"),
+              os.path.join(home, "OneDrive", "Documents"),
+              os.path.join(home, "OneDrive", "文档")):
+        if os.path.isdir(p):
+            k = os.path.normcase(os.path.normpath(p))
+            if k not in {os.path.normcase(os.path.normpath(x)) for x in out}:
+                out.append(p)
+    return out or [os.path.join(home, "Documents")]
+
+
 def _roots():
     """返回 [(根目录, 平台标签, 是否参与启发式扫描), ...]"""
     out = []
+    seen = set()
+
+    def push(p, tag, heur):
+        if not p or not os.path.isdir(p):
+            return
+        k = os.path.normcase(os.path.normpath(p))
+        if k in seen:
+            return
+        seen.add(k)
+        out.append((p, tag, heur))
+
     home = os.path.expanduser("~")
     if sys.platform.startswith("win"):
         appdata = os.environ.get("APPDATA", "")
         local = os.environ.get("LOCALAPPDATA", "")
         low = os.path.normpath(os.path.join(local, "..", "LocalLow")) if local else ""
-        docs = os.path.join(home, "Documents")
         pd = os.environ.get("PROGRAMDATA", "")
-        for p, tag, heur in ((local, "Windows", False),
-                             (low, "Windows", True),
-                             (appdata, "Windows", True),
-                             (pd, "Windows", False)):
-            if p and os.path.isdir(p):
-                out.append((p, tag, heur))
-        for sub in ("My Games", "Saved Games"):
-            p = os.path.join(docs, sub)
-            if os.path.isdir(p):
-                out.append((p, "Windows", True))
+        push(local, "Windows", False)
+        push(low, "Windows", True)
+        push(appdata, "Windows", True)
+        push(pd, "Windows", False)
+        for docs in _documents_dirs():
+            for sub in ("My Games", "Saved Games"):
+                push(os.path.join(docs, sub), "Windows", True)
+        # Saved Games 的标准位置是 %USERPROFILE%\Saved Games（不是文档下）。
+        # 之前只扫了「文档\Saved Games」，把用系统 Known Folder 存盘的
+        # 游戏（相当一部分 Xbox / UWP 移植作）整个漏掉了。
+        push(os.path.join(home, "Saved Games"), "Windows", True)
         for steam in ("C:\\steam", "C:\\Program Files (x86)\\Steam",
                       "C:\\Program Files\\Steam", "D:\\steam", "E:\\steam"):
-            p = os.path.join(steam, "userdata")
-            if os.path.isdir(p):
-                out.append((p, "Steam 云", False))
+            push(os.path.join(steam, "userdata"), "Steam 云", False)
     elif sys.platform == "darwin":
         p = os.path.join(home, "Library", "Application Support")
         if os.path.isdir(p):
@@ -213,7 +241,6 @@ KNOWN_GAMES = [
     ("心灵传说", "Steam", ["Tales of Hearts"], "AppData\\Roaming\\Bandai Namco"),
     ("美德传说", "Steam", ["Tales of Innocence"], "AppData\\Roaming\\Bandai Namco"),
     ("世界传说", "Steam", ["Tales of the World"], "AppData\\Roaming\\Bandai Namco"),
-    (" rescue", "独立", ["res"], "AppData\\Roaming"),
     # Unity 游戏，Company=TeamSoda / Product=Duckov（见安装目录
     # Duckov_Data\app.info）。存档在 LocalLow\TeamSoda\Duckov\Saves，
     # 工作名中间层只有 Player.log，启发式容易看走眼，查表钉死更稳。
@@ -278,9 +305,16 @@ NOISE = (
 # "teams"（本意排除 Microsoft Teams）把 TeamSoda 一起干掉了，
 # 逃离鸭科夫的真实存档 LocalLow\TeamSoda\Duckov\Saves 就此被整个漏掉。
 NOISE_PREFIX = (
-    "cache", "log", "crash", "temp", "tmp", "shader", "gpucache",
-    "thumbcache", "webcache", "code cache", "minidump", "crashpad",
-    "squirreltemp", "com.example", "io.github", "aclog", "acsdkinslog",
+    "cache", "gpucache", "shadercache", "thumbcache", "webcache", "cachedata",
+    # 只认完整的「崩溃上报」词干。以前用 "crash" / "temp" / "log" 这种
+    # 三字母前缀，"Crashlands"（撞车大陆）、"Tempest" 这类真游戏会被
+    # 当成噪音整目录跳过 —— 扫描器的首要任务是别漏游戏，宁可留下噪音。
+    "crashreport", "crashpad", "crashdump", "crashhandler", "crashsender",
+    "crashrpt", "crashes",
+    "minidump", "squirreltemp",
+    "tempfile", "tempdir", "tempfolder", "tmpfile",
+    "logfile", "logs", "shadercompiler",
+    "com.example", "io.github", "aclog", "acsdkinslog",
     "vcredist", "dotnet", "netframework", "078", "gamesir",
 )
 
@@ -316,18 +350,27 @@ def _dir_file_count(path: str, max_files: int = 2000) -> tuple:
     return n, total
 
 
-def _looks_like_save_dir(path: str, max_files: int = 400) -> tuple:
+def _looks_like_save_dir(path: str, max_files: int = 400,
+                         max_scanned: int = 20000) -> tuple:
     """返回 (文件数, 总字节)。只统计命中强存档特征的**非空**文件。
 
     0 字节的 .lock / 占位文件不算证据 —— 应用会成批造这种文件，
     拿它当存档特征，任何软件都能被报成游戏。
+
+    max_scanned 是「看过的文件总数」上限，不是命中数上限：一个几十万文件
+    的非游戏目录（浏览器缓存、日志归档）里可能一个存档特征都没有，
+    只按命中数限制会让 os.walk 一直走到底，扫描卡住几十秒。
     """
     n = 0
     total = 0
+    scanned = 0
     try:
         for r, dirs, fs in os.walk(path):
             dirs[:] = [d for d in dirs if not _is_noise_dir(d)]
             for f in fs:
+                scanned += 1
+                if scanned > max_scanned:
+                    return n, total
                 low = f.lower()
                 if not any(h in low for h in SAVE_HINTS):
                     continue
@@ -450,6 +493,7 @@ def scan(known_paths=None, heuristic=True, max_depth=3,
     known_paths = {os.path.normpath(p).lower() for p in (known_paths or [])}
     found = {}
     order = []
+    roots = _roots()
 
     def covered(paths):
         """候选与已添加目录，只要一个是另一个的父子，就算已覆盖。"""
@@ -471,11 +515,22 @@ def scan(known_paths=None, heuristic=True, max_depth=3,
         order.append(key)
 
     # ---------- 1. 查表：路径已知，宽松判定 ----------
+    # 锚点解析出来是绝对路径，和 root 无关；同一个锚点在不同 root 下会
+    # 解出同一个目录。先按 root 去重再判断存在性，否则同一份存档会被
+    # _dir_file_count 反复遍历 6 遍（本机测过 4 款查表游戏 = 24 次多余 walk）。
     for name, platform, rels, anchor in KNOWN_GAMES:
-        for root, tag, _heur in _roots():
+        bases = []
+        seen = set()
+        for root, _tag, _heur in roots:
             base = _resolve_anchor(root, anchor)
             if not base:
                 continue
+            k = os.path.normcase(os.path.normpath(base))
+            if k in seen:
+                continue
+            seen.add(k)
+            bases.append(base)
+        for base in bases:
             for rel in rels:
                 p = os.path.join(base, rel)
                 if os.path.isdir(p):
@@ -491,7 +546,7 @@ def scan(known_paths=None, heuristic=True, max_depth=3,
     # ---------- 2. 启发式：先证明「这是游戏」，再看有没有存档 ----------
     if heuristic:
         catalog = _game_catalog()
-        for root, tag, heur in _roots():
+        for root, tag, heur in roots:
             if not heur:
                 continue
             # LocalLow 是 Unity 专用的 <工作室>\<游戏> 布局，
@@ -573,7 +628,6 @@ def _resolve_anchor(root: str, anchor: str):
     a = anchor.strip()
     if not a or a == ".":
         return root
-    home = os.path.expanduser("~")
     if sys.platform.startswith("win"):
         if a.startswith("AppData\\Roaming"):
             return os.path.join(os.environ.get("APPDATA", ""),
@@ -588,8 +642,15 @@ def _resolve_anchor(root: str, anchor: str):
             return os.path.join(os.environ.get("LOCALAPPDATA", ""),
                                 a[len("AppData\\Local"):].lstrip("\\"))
         if a.startswith("Documents"):
-            return os.path.join(home, "Documents",
-                                a[len("Documents"):].lstrip("\\"))
+            tail = a[len("Documents"):].lstrip("\\")
+            # 文档可能被 OneDrive 重定向：逐个候选找真正存在的那份，
+            # 都不存在时按第一个拼（后面 os.path.isdir 会自然过滤掉）。
+            for d in _documents_dirs():
+                p = os.path.join(d, tail) if tail else d
+                if os.path.exists(p):
+                    return p
+            d = _documents_dirs()[0]
+            return os.path.join(d, tail) if tail else d
         if a.startswith("ProgramData"):
             return os.path.join(os.environ.get("PROGRAMDATA", ""),
                                 a[len("ProgramData"):].lstrip("\\"))

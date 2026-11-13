@@ -196,10 +196,14 @@ class Vault:
         old = self.find_by_name(name, only_removed=True)
         if old is not None:
             # 保留仍然存在的旧目录，避免「原本两个存档目录，这次只扫到一个」
-            # 的场景下把另一个活着的目录丢掉。
-            merged = list(paths)
-            for p in old.paths:
-                if p not in merged and os.path.isdir(p):
+            # 的场景下把另一个活着的目录丢掉。去重键用 normcase ——
+            # Windows 上 C:\Foo 和 c:\foo 是同一个目录。
+            merged = []
+            seen = set()
+            for p in list(paths) + [p for p in old.paths if os.path.isdir(p)]:
+                k = os.path.normcase(os.path.normpath(p))
+                if k not in seen:
+                    seen.add(k)
                     merged.append(p)
             old.paths = merged
             old.platform = platform or old.platform
@@ -229,14 +233,21 @@ class Vault:
             return None
         rows = self.db.execute("SELECT * FROM games")
         best = None
+        best_key = None
         for r in rows:
             if norm_name(r["name"]) != q:
                 continue
             g = self._game_from_row(r)
             if only_removed and not g.is_removed:
                 continue
-            if best is None or g.removed_at > best.removed_at:
-                best = g
+            # 活动记录永远优先于已移除的；同类里取最近移除的那条。
+            # 旧写法只比 removed_at 大小，活动记录是 0，一旦列表里既有
+            # 活动记录、又有一条被移除过的同名记录，返回的反而是移除的那条，
+            # add_game 的「重复添加」判断会直接失效。
+            key = (1 if g.is_removed else 0,
+                   -(g.removed_at if g.is_removed else 0.0))
+            if best_key is None or key < best_key:
+                best, best_key = g, key
         return best
 
     def save_game(self, g: Game):
@@ -665,6 +676,18 @@ class Vault:
                 continue
             plan.append((rel, e, dst))
 
+        # 写入前先确认 chunk 都在。缺 chunk 时如果边写边炸，存档目录会停在
+        # 一半新一半旧的中间态；虽然 pre_backup 能救回来，但没必要让用户
+        # 走这一遭。宁可一个字节都不写，直接报「快照不完整」。
+        missing = sorted({c.sha256 for _rel, e, _dst in plan
+                          for c in e.chunks
+                          if not self.store.has(c.sha256)})
+        if missing:
+            raise RuntimeError(
+                "快照数据不完整，缺少 %d 个 chunk（%s…）。"
+                "已中止还原，未写入任何文件。"
+                % (len(missing), "、".join(missing[:3])))
+
         if pre_backup and plan:
             if stage_cb:
                 stage_cb("正在备份当前档位…")
@@ -746,8 +769,15 @@ class Vault:
     def _backup_existing(self, game_id: str, rel: str, src: str, reason: str):
         stamp = time.strftime("%Y%m%d_%H%M%S")
         safe_rel = rel.replace("/", "__").replace("\\", "__")
+        # Windows 文件名禁用字符 + 控制字符。远端快照是不可信输入，
+        # 里面若带 `a:b` 这种路径，copy2 会直接失败，整个还原被拖断。
+        safe_rel = "".join("_" if (ch in '<>:"|?*' or ord(ch) < 32) else ch
+                           for ch in safe_rel).strip(" .")
+        # 同一秒内可能给多个文件留底；不同 rel 也可能映射出同名（a/b 与 a__b）。
+        # 用 rel 的短哈希保证唯一，绝不互相覆盖 —— 留底被覆盖等于没留。
+        tag = hashlib.sha1(rel.encode("utf-8")).hexdigest()[:8]
         dst = os.path.join(self.localcopies_dir,
-                           "%s_%s_%s" % (game_id[:8], stamp, safe_rel))
+                           "%s_%s_%s_%s" % (game_id[:8], stamp, tag, safe_rel))
         shutil.copy2(src, dst)
         self.db.execute(
             "INSERT INTO local_copies(game_id,path,backup_path,created_at,reason)"

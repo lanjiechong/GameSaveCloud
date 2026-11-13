@@ -15,6 +15,7 @@ RemoteBackend 只暴露 5 类原语：
 import json
 import os
 import shutil
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -84,6 +85,9 @@ class LocalFolderBackend(RemoteBackend):
         self.snapshots_dir = os.path.join(self.root, "snapshots")
         os.makedirs(self.chunks_dir, exist_ok=True)
         os.makedirs(self.snapshots_dir, exist_ok=True)
+        # 与 WebDAV 同款短期缓存：刷新状态会按游戏逐个 list_snapshots，
+        # 每次都把所有 JSON 重新解析一遍纯属浪费（15 款 × 每款几十份）。
+        self._snap_cache = None
 
     # ---------- 快照 ----------
     def _snap_path(self, sid: str) -> str:
@@ -99,7 +103,9 @@ class LocalFolderBackend(RemoteBackend):
         except Exception as e:
             return False, "目录不可写：%s" % e
 
-    def list_snapshots(self, game_id: str) -> list:
+    def _all_snapshots(self) -> list:
+        if self._snap_cache and time.time() - self._snap_cache[0] < 5.0:
+            return self._snap_cache[1]
         out = []
         for f in os.listdir(self.snapshots_dir):
             if not f.endswith(".json"):
@@ -107,13 +113,15 @@ class LocalFolderBackend(RemoteBackend):
             try:
                 with open(os.path.join(self.snapshots_dir, f), encoding="utf-8") as fh:
                     d = json.load(fh)
-                if d.get("game_id") != game_id:
-                    continue
                 out.append(Snapshot.from_dict(d))
             except Exception:
                 continue
         out.sort(key=lambda s: s.created_at, reverse=True)
+        self._snap_cache = (time.time(), out)
         return out
+
+    def list_snapshots(self, game_id: str) -> list:
+        return [s for s in self._all_snapshots() if s.game_id == game_id]
 
     def get_snapshot(self, sid: str) -> Snapshot:
         p = self._snap_path(sid)
@@ -125,11 +133,13 @@ class LocalFolderBackend(RemoteBackend):
     def put_snapshot(self, snap: Snapshot):
         with open(self._snap_path(snap.id), "w", encoding="utf-8") as f:
             json.dump(snap.to_dict(), f, ensure_ascii=False, indent=1)
+        self._snap_cache = None
 
     def delete_snapshot(self, sid: str):
         p = self._snap_path(sid)
         if os.path.isfile(p):
             os.remove(p)
+        self._snap_cache = None
 
     # ---------- chunk ----------
     def _chunk_path(self, sha: str) -> str:
@@ -258,6 +268,12 @@ class WebDAVBackend(RemoteBackend):
         self.password = password
         self.timeout = timeout
         self._auth = self._make_auth()
+        # 云端快照清单缓存 (时间戳, 全部快照)。快照按 game_id 过滤，
+        # 但文件名里没有 game_id，只能把每份 JSON 都 GET 下来才知道属于谁。
+        # 刷新状态时要按游戏逐个 list_snapshots，不缓存就是
+        # 「游戏数 × 快照数」次网络请求。缓存 5 秒足够覆盖一轮刷新，
+        # 写/删快照时立刻失效。
+        self._snap_cache = None
 
     def _make_auth(self):
         import base64
@@ -303,7 +319,10 @@ class WebDAVBackend(RemoteBackend):
             return False, "WebDAV 连接失败：%s" % e
 
     # ---------- 快照 ----------
-    def list_snapshots(self, game_id: str) -> list:
+    def _all_snapshots(self) -> list:
+        """云端全部快照（带 5 秒缓存）。"""
+        if self._snap_cache and time.time() - self._snap_cache[0] < 5.0:
+            return self._snap_cache[1]
         out = []
         try:
             resp = self._req("PROPFIND", self._url("snapshots"),
@@ -312,7 +331,8 @@ class WebDAVBackend(RemoteBackend):
         except RemoteError:
             return []
         import re
-        for m in re.finditer(r"<d:href>([^<]+)</d:href>", body):
+        # 命名空间前缀各家不同（<d:href> / <D:href> / 无前缀），都认
+        for m in re.finditer(r"<(?:\w+:)?href>([^<]+)</(?:\w+:)?href>", body):
             href = urllib.parse.unquote(m.group(1))
             sid = os.path.basename(href.rstrip("/"))
             if not sid.endswith(".json"):
@@ -322,9 +342,12 @@ class WebDAVBackend(RemoteBackend):
                 out.append(self.get_snapshot(sid))
             except Exception:
                 continue
-        out = [s for s in out if s.game_id == game_id]
         out.sort(key=lambda s: s.created_at, reverse=True)
+        self._snap_cache = (time.time(), out)
         return out
+
+    def list_snapshots(self, game_id: str) -> list:
+        return [s for s in self._all_snapshots() if s.game_id == game_id]
 
     def get_snapshot(self, sid: str) -> Snapshot:
         try:
@@ -338,12 +361,14 @@ class WebDAVBackend(RemoteBackend):
         data = json.dumps(snap.to_dict(), ensure_ascii=False, indent=1).encode("utf-8")
         self._req("PUT", self._url("snapshots", snap.id + ".json"), data=data,
                   headers={"Content-Type": "application/json"})
+        self._snap_cache = None
 
     def delete_snapshot(self, sid: str):
         try:
             self._req("DELETE", self._url("snapshots", sid + ".json"))
         except RemoteError:
             pass
+        self._snap_cache = None
 
     # ---------- chunk ----------
     def _chunk_url(self, sha: str) -> str:
@@ -361,22 +386,20 @@ class WebDAVBackend(RemoteBackend):
 
     def upload_chunk(self, sha: str, blob: bytes, progress_cb=None):
         url = self._chunk_url(sha)
-        # 断点续传：先问云端已有多少字节，从断点处续传
+        # 只按「大小完全一致」判定云端已有。大小对不上（半截 / 被旧版本
+        # 写坏）时整块重传覆盖。
+        #
+        # 这里刻意不用 PUT + Content-Range 做块内续传：多数 WebDAV 服务器
+        # 不支持 Range 写入，会忽略 Content-Range 直接把文件覆盖成「只有
+        # 尾部这一段」，而 HEAD 只看得到大小 —— 下次同步会误判「已存在」，
+        # 永远不再修它。chunk 最多 1 MiB，整块重传的代价远小于传坏数据。
+        # chunk 级续传（已传完的块直接跳过）不受影响，那才是省时间的地方。
         have = self._chunk_head_size(sha)
         if have == len(blob):
             if progress_cb:
                 progress_cb(len(blob), len(blob))
             return False
-        if have and have < len(blob):
-            # 续传用 PUT + Content-Range 尽最大努力（部分 WebDAV 服务器支持，
-            # 如坚果云 / Apache mod_dav 的追加扩展）；不支持的服务器会报错
-            # 或覆盖，下一轮同步会以 HEAD 校验结果决定是否重传，且本地
-            # chunk 按内容哈希命名，覆盖成错内容会被 verify() 拦下。
-            self._req("PUT", url, data=blob[have:],
-                      headers={"Content-Range": "bytes %d-*/%d"
-                               % (have, len(blob))})
-        else:
-            self._req("PUT", url, data=blob)
+        self._req("PUT", url, data=blob)
         if progress_cb:
             progress_cb(len(blob), len(blob))
         return True
@@ -391,6 +414,10 @@ class WebDAVBackend(RemoteBackend):
             headers["Range"] = "bytes=%d-" % have
         try:
             resp = self._req("GET", url, headers=headers)
+            # 服务器不支持 Range 时会回 200 + 全量内容。此时绝不能 append，
+            # 否则 .part 变成「旧半截 + 全量」的垃圾，永远校验不过。
+            if have and getattr(resp, "status", 200) == 200:
+                have = 0
             mode = "ab" if have else "wb"
             with open(tmp, mode) as f:
                 while True:

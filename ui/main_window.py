@@ -87,6 +87,10 @@ class MainWindow(QMainWindow):
         self.statuses = {}          # game_id -> GameStatus
         self.busy = False
         self.last_plan = None
+        # 批量同步的进度累加器：失败的集中到最后提示一次，
+        # 不要每款游戏弹一个模态框，也不要因为一款失败就放弃后面的。
+        self._sync_failed = []
+        self._sync_ok = 0
         # 图标服务：已匹配图标 → 磁盘缓存 → 内置预设 → 联网检索 → 占位兜底
         self.icons_dir = os.path.join(self.cfg.base, "gameicons")
         self.logos = LogoService(cache_dir=os.path.join(self.cfg.base, "logocache"),
@@ -355,10 +359,12 @@ class MainWindow(QMainWindow):
             out = []
             for g in games:
                 out.append(self.engine.status(g))
-            return games, out, merged
+            # chunk 数是走目录数出来的，放在工作线程算 —— 几万个 chunk
+            # 的 stat 在主线程做完，界面会明显顿一下。
+            return games, out, merged, self.vault.stats()
 
         def done(res):
-            games, sts, merged = res
+            games, sts, merged, st = res
             self.statuses = {s.game_id: s for s in sts}
             self.game_list.clear()
             for g, s in zip(games, sts):
@@ -370,10 +376,12 @@ class MainWindow(QMainWindow):
                 # 先用已有图标渲染（已匹配的 / 离线包里的 / 内置预设 / 占位），
                 # 联网补齐交给 MetaService 异步跑，不阻塞这一帧。
                 self.logos.pixmap_for_game(g)
-            self._update_vault_info()
+            self._update_vault_info(st)
             self._update_mode_ui(sts)
             if self.game_list.count():
                 self.game_list.setCurrentRow(0)
+            else:
+                self._clear_detail()
             self._set_busy(False)
             for s in sts:
                 if s.state == SYNC_CONFLICT:
@@ -489,8 +497,23 @@ class MainWindow(QMainWindow):
                 "padding:2px 9px; font-size:11px; font-weight:600;"
                 % (PALETTE["unknown_bg"], PALETTE["muted"]))
 
-    def _update_vault_info(self):
-        st = self.vault.stats()
+    def _update_vault_info(self, st=None):
+        """刷新底部的保险库统计。
+
+        st 由调用方在后台线程算好传进来最好；没有就自己起一个后台任务，
+        绝不在主线程 os.walk 整个 chunk store（几万个文件会让界面卡住）。
+        """
+        if st is not None:
+            self._apply_vault_info(st)
+            return
+
+        def job(sig):
+            return self.vault.stats()
+
+        run_async(job, on_result=self._apply_vault_info,
+                  on_error=lambda e: None)
+
+    def _apply_vault_info(self, st):
         self.vault_info.setText("保险库：%d 款游戏 · %d 个快照 · %d 个 chunk · %s"
                                 % (st["games"], st["snapshots"], st["chunks"],
                                    _human(st["chunk_bytes"])))
@@ -498,9 +521,26 @@ class MainWindow(QMainWindow):
     def on_game_selected(self):
         g = self.current_game()
         if not g:
+            self._clear_detail()
             return
         self._refresh_detail(g)
         self._load_snapshots(g)
+
+    def _clear_detail(self):
+        """列表空了（最后一款被移除）时把右侧清干净。
+
+        否则卡片和历史表还留着上一款游戏的内容，看着像还能操作，
+        实际上 current_game() 已经是 None。
+        """
+        self.lbl_title.setText("选择一个游戏")
+        self.lbl_title.setToolTip("")
+        self.lbl_state.setText("—")
+        self.lbl_state.setStyleSheet("")
+        self.lbl_last.setText("最后同步：—")
+        self.lbl_size.setText("本地 — · 云端 —")
+        self.lbl_snaps.setText("快照 0 个")
+        self.lbl_msg.setText("")
+        self.snap_table.setRowCount(0)
 
     def _refresh_detail(self, g):
         s = self.statuses.get(g.id) or GameStatus(game_id=g.id)
@@ -522,7 +562,7 @@ class MainWindow(QMainWindow):
         msg = s.message or ""
         # 存档目录不在 = 游戏被卸了 / 装到别的盘了。这时候点「备份」只会
         # 生成一个 0 文件的空快照，点「回滚」以前还会往幽灵目录写，必须提示。
-        gone = [p for p in g.paths if not os.path.isdir(p)]
+        gone = [p for p in g.paths if not os.path.exists(p)]
         if gone:
             msg = ("%s · %d 个存档目录不存在，点「找回存档」重新定位"
                    % (msg, len(gone)) if msg else
@@ -627,12 +667,15 @@ class MainWindow(QMainWindow):
         游戏被卸载、或整个搬迁到别的盘时就是这状态 —— 直接跳过，
         等「找回存档」处理完再备份。
         """
-        return not any(os.path.isdir(p) for p in (g.paths or ()))
+        return not any(os.path.exists(p) for p in (g.paths or ()))
 
     def backup_current(self):
         g = self.current_game()
         if not g:
             msgbox.info(self, "未选择", "请先在左侧选择一个游戏。")
+            return
+        if self.busy:
+            self._log("已有任务在执行，本次备份跳过")
             return
         if self._all_roots_gone(g):
             msgbox.warn(self, "存档目录不存在",
@@ -691,33 +734,45 @@ class MainWindow(QMainWindow):
         return n
 
     def _prune(self, g):
-        """按「每款游戏保留快照数」裁剪本地与云端的旧快照。
+        """按「每款游戏保留快照数」裁剪**本地**旧快照。
 
         配置项此前的状态是「设置了但没有任何代码读它」。定时同步一小时
         一次，不裁剪的话备份目标会无限增长，而 chunk 去重本来就是为了
         避免这件事。同步基准快照受保护，不参与裁剪。
-        本地备份模式下只裁本地 —— 没有云端可裁。
+
+        云端裁剪刻意不放在这里：done 回调跑在主线程，WebDAV 的
+        list + delete 是一串网络请求，放在这儿会把界面冻住几秒。
+        云端裁剪改在同步工作线程里做（_sync_next 的 job 开头）。
         """
         keep = int(self.cfg.safety.get("keep_snapshots", 30) or 0)
         if keep <= 0:
             return
         try:
             n = self.vault.prune_snapshots(g.id, keep)
-            nr = 0
-            if self.remote is not None:
-                ss = self.vault.get_sync_state(g.id) or {}
-                nr = self.remote.prune_snapshots(g.id, keep,
-                                                 protect={ss.get("base_snapshot_id")})
-            if n or nr:
-                self._log("已裁剪 %s 的旧快照：本地 %d 份 / 云端 %d 份"
-                          "（保留最近 %d 版）" % (g.name, n, nr, keep))
+            if n:
+                self._log("已裁剪 %s 的旧快照：本地 %d 份（保留最近 %d 版）"
+                          % (g.name, n, keep))
         except Exception as e:
             self._log("裁剪 %s 的快照失败：%s" % (g.name, e))
+
+    def _prune_remote(self, g) -> int:
+        """裁剪云端快照。只允许在工作线程调用（会发网络请求）。"""
+        if self.remote is None:
+            return 0
+        keep = int(self.cfg.safety.get("keep_snapshots", 30) or 0)
+        if keep <= 0:
+            return 0
+        ss = self.vault.get_sync_state(g.id) or {}
+        return self.remote.prune_snapshots(
+            g.id, keep, protect={ss.get("base_snapshot_id")})
 
     # ---------- 同步 ----------
     def sync_current(self):
         g = self.current_game()
         if not g:
+            return
+        if self.busy:
+            self._log("已有任务在执行，本次同步跳过")
             return
         if not self.cloud_on:
             # 本地模式下「同步此游戏」就是给这一款存一份快照
@@ -726,6 +781,12 @@ class MainWindow(QMainWindow):
         self._sync_games([g], silent=False)
 
     def sync_all(self, silent=False):
+        if self.busy:
+            # 托盘「立即同步」不经过按钮的禁用状态，必须自己挡一道：
+            # 两个批量队列共用 self._sync_queue，叠在一起会把队列搅乱。
+            if not silent:
+                self._log("已有任务在执行，本次同步跳过")
+            return
         games = self.vault.list_games()
         if not games:
             if not silent:
@@ -784,6 +845,8 @@ class MainWindow(QMainWindow):
         self._set_busy(True, "开始同步 %d 款游戏…" % len(games))
         self._sync_queue = list(games)
         self._sync_silent = silent
+        self._sync_failed = []
+        self._sync_ok = 0
         self._sync_next()
 
     def _sync_next(self):
@@ -794,15 +857,34 @@ class MainWindow(QMainWindow):
             return
         if not self._sync_queue:
             self._set_busy(False)
-            self._log("全部同步完成")
+            failed = list(getattr(self, "_sync_failed", []) or [])
+            ok = int(getattr(self, "_sync_ok", 0) or 0)
+            if failed:
+                self._log("同步结束：%d 款完成，%d 款未完成" % (ok, len(failed)))
+            else:
+                self._log("全部同步完成")
             self.refresh_all()
             if not self._sync_silent:
-                msgbox.done(self, "同步完成", "所有游戏已同步。")
+                if failed:
+                    msgbox.warn(
+                        self, "同步未完成",
+                        "以下 %d 款游戏没能同步：\n\n%s\n\n"
+                        "已完成的游戏不受影响；未完成的已保留现场，处理后可重试。"
+                        % (len(failed),
+                           "\n".join("· %s：%s" % (n, m) for n, m in failed[:8])))
+                else:
+                    msgbox.done(self, "同步完成", "所有游戏已同步。")
             return
         g = self._sync_queue.pop(0)
 
         def job(sig):
             self._check_cancel()
+            # 云端裁剪放这里：工作线程，网络请求不会冻界面。
+            # 失败不影响本次同步（纯维护动作）。
+            try:
+                self._prune_remote(g)
+            except Exception:
+                pass
             plan = self.engine.plan(g)
             if plan.error:
                 return g, plan, None, plan.error
@@ -820,20 +902,29 @@ class MainWindow(QMainWindow):
                 self._set_busy(False)
                 self._handle_conflicts(g, plan)
                 return
+            if flag:
+                # 计划阶段就失败了（云端连不上、存档目录不存在…）。
+                # 以前这里落到「无需同步」，把错误吞掉还报成功；
+                # 也不该因为这一款就放弃队列里剩下的游戏。
+                msg = str(flag)
+                self._sync_failed.append((g.name, msg.splitlines()[0][:160]))
+                self._log("! %s：%s" % (g.name, msg.splitlines()[0]))
+                self._sync_next()
+                return
             if r and r.get("errors"):
                 for e in r["errors"]:
                     self._log("! %s" % e)
-                self._set_busy(False)
-                if not self._sync_silent:
-                    msgbox.warn(self, "同步未完成",
-                                        "%s 有 %d 项失败，已保留现场，下次重试：\n%s"
-                                        % (g.name, len(r["errors"]), "\n".join(r["errors"][:5])))
-                self.refresh_all()
+                self._sync_failed.append(
+                    (g.name, "；".join(r["errors"])[:160]))
+                self._prune(g)
+                self._sync_next()
                 return
             if r:
+                self._sync_ok += 1
                 self._log("%s 同步完成：上传 %d chunk / 下载 %d chunk"
                           % (g.name, r["uploaded"], r["downloaded"]))
             else:
+                self._sync_ok += 1
                 self._log("%s 无需同步" % g.name)
             self._prune(g)
             self._sync_next()
@@ -844,7 +935,10 @@ class MainWindow(QMainWindow):
     def _handle_conflicts(self, g, plan):
         dlg = ConflictDialog(g.name, plan.conflicts, self)
         if dlg.exec() != ConflictDialog.Accepted:
-            self._log("%s 冲突未处理，同步暂停" % g.name)
+            self._log("%s 冲突未处理，本次批量同步暂停" % g.name)
+            # 用户选择「暂不处理」：把队列清掉，别让后面的游戏在不知情时
+            # 继续跑；已经完成的那些不受影响。
+            self._sync_queue = []
             self.refresh_all()
             return
         self._set_busy(True, "正在按裁决同步 %s …" % g.name)
@@ -854,12 +948,20 @@ class MainWindow(QMainWindow):
             return self.engine.execute(g, plan, resolutions)
 
         def done(r):
-            self._set_busy(False)
             if r.get("errors"):
+                self._sync_failed.append((g.name, r["errors"][0][:160]))
                 self._err("同步失败：\n" + "\n".join(r["errors"][:5]))
             else:
+                self._sync_ok += 1
                 self._log("%s 冲突已按你的选择处理" % g.name)
-            self.refresh_all()
+            # 冲突处理完继续批量队列，别把剩下几款游戏晾着。
+            # 注意不要在继续前把 busy 放下：_sync_next 每款都会 _set_busy(True)
+            # 的话会顺手清掉用户刚点的取消标记。
+            if getattr(self, "_sync_queue", None):
+                self._sync_next()
+            else:
+                self._set_busy(False)
+                self.refresh_all()
 
         run_async(job, on_result=done,
                   on_error=lambda e: (self._set_busy(False), self._err(e)))
@@ -907,12 +1009,14 @@ class MainWindow(QMainWindow):
         if gone:
             # 目标目录都不在，还原只会把这些目录重新建出来。以前是静默的，
             # 用户看到「还原成功」，游戏读的却是新路径，等于白还原。
-            if msgbox.ask(self, "存档目录不存在",
-                          "以下目录已不存在：\n\n%s\n\n"
-                          "现在还原会把它们重新建出来，游戏读不到。\n"
-                          "要先去「找回存档」定位新位置吗？" % "\n".join(gone),
-                          ok_text="去找回", cancel_text="仍然还原"):
-                self.find_save_dir()
+            # 用 ConfirmDialog 而不是 msgbox.ask：它的默认焦点在「取消」，
+            # 按回车 / Esc / 关窗都不会误触发还原。
+            if not ConfirmDialog.ask(
+                    "存档目录不存在",
+                    "以下目录已不存在，还原会把它们重新创建出来，游戏通常读不到。",
+                    "目录：\n%s\n\n确定仍然要还原吗？建议先点「找回存档」定位新位置。"
+                    % "\n".join(gone),
+                    parent=self):
                 return
         push = ("还原后本地内容与该版本完全一致，随后同步会把此版本推送到云端。"
                 if self.cloud_on else
@@ -954,6 +1058,9 @@ class MainWindow(QMainWindow):
                 return
             self._log("还原完成：写入 %d 个文件；还原前已备份当前档位 %d 个文件"
                       % (st["restored"], st.get("pre_files", 0)))
+            if st.get("skipped"):
+                self._log("有 %d 个文件被跳过（目标目录不存在或目录编号已变化）"
+                          % st["skipped"])
             self._prune(g)
             self._set_busy(False)
             self.refresh_all()
@@ -962,6 +1069,9 @@ class MainWindow(QMainWindow):
                    % st.get("pre_files", 0)
                    if st.get("pre_snapshot") else
                    "还原前当前档位是空的，没有需要备份的内容。")
+            if st.get("skipped"):
+                tip += ("\n\n另有 %d 个文件未写入：快照里的存档目录编号与当前"
+                        "配置对不上，或目标目录不存在。" % st["skipped"])
             msgbox.done(self, "还原完成",
                         "已写入 %d 个文件（%s）。\n\n%s"
                         % (st["restored"], _human(st["bytes"]), tip))
@@ -1029,13 +1139,31 @@ class MainWindow(QMainWindow):
             if dlg.exec() != AddGameDialog.Accepted:
                 return
             picked = dlg.get_selected()
+            # 已添加的目录（含父/子目录）直接跳过：扫描结果里标了
+            # already_added，但「添加自定义」是手输路径，很容易把一个
+            # 已经加过的目录再加一遍，列表里就会出现两条同源记录。
+            taken = {os.path.normcase(os.path.normpath(p))
+                     for g in existing for p in g.paths}
+
+            def covered(np):
+                for k in taken:
+                    if (np == k or np.startswith(k + os.sep)
+                            or k.startswith(np + os.sep)):
+                        return True
+                return False
+
             for fg in picked:
+                np = os.path.normcase(os.path.normpath(fg.paths[0]))
+                if covered(np):
+                    self._log("跳过已添加的目录：%s" % fg.paths[0])
+                    continue
                 # 顺手记下安装根。现在只是多读两个清单文件，但存档一旦落在
                 # 安装目录里，卸载重装后「找回存档」就靠它换算新位置。
                 g = self.vault.add_game(
                     fg.name, fg.paths, platform=fg.platform,
                     install_dir=launcher.find_install_dir(
                         fg.name, platform=fg.platform).get("install_dir", ""))
+                taken.add(np)
                 self._log("已添加游戏：%s（%s）" % (g.name, " / ".join(g.paths)))
             self.refresh_all()
 
@@ -1079,7 +1207,22 @@ class MainWindow(QMainWindow):
         g = self.current_game()
         if not g:
             return
-        d = relocate.diagnose(g, self.vault)
+        # 诊断会读平台清单、在 AppData / 文档下逐个目录比对文件名，
+        # 存档目录真的丢了时可能扫上万个目录。放主线程会把界面冻住，
+        # 用户以为程序卡死又点一次，就越排越多。
+        self._set_busy(True, "正在查找 %s 的存档目录…" % g.name)
+
+        def job(sig):
+            return relocate.diagnose(g, self.vault)
+
+        def done(d):
+            self._set_busy(False)
+            self._handle_diagnose(g, d)
+
+        run_async(job, on_result=done,
+                  on_error=lambda e: self._op_error(e))
+
+    def _handle_diagnose(self, g, d):
         if d["state"] == "ok":
             msgbox.info(self, "路径正常",
                         "存档目录都在，不需要找回：\n\n%s" % "\n".join(g.paths))
@@ -1206,7 +1349,14 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self.cfg, self)
         if dlg.exec() != SettingsDialog.Accepted:
             return
-        old_remote = self.cfg.remote_conf.get("path")
+
+        def cloud_sig():
+            r = self.cfg.remote_conf
+            return (bool(r.get("enabled")), r.get("type"), r.get("path"),
+                    r.get("url"), r.get("user"),
+                    self.cfg.get_remote_password())
+
+        old_sig = cloud_sig()          # 保存前的实际生效配置
         old_vault = self.cfg.vault_root
         old_cloud = self.cloud_on
         dlg.apply()
@@ -1215,7 +1365,12 @@ class MainWindow(QMainWindow):
             msgbox.info(self, "需要重启",
                                     "本地保险库目录已更改，请重启应用生效。")
             return
-        if old_cloud != self.cloud_on or old_remote != self.cfg.remote_conf.get("path"):
+        # 后端类型 / 地址 / 账号 / 密码任一变化都要重建后端。
+        # 以前只比 path，从「本地目录」切到 WebDAV、或改 WebDAV 地址
+        # 都会被当成没变，旧后端一直用到重启为止。
+        # 注意不能拿 password_enc 当比较键：DPAPI 每次加密结果都不同，
+        # 同一个密码也会被判成「变了」。
+        if old_cloud != self.cloud_on or old_sig != cloud_sig():
             self._rebuild_backend()
         self._apply_schedule()
         self.refresh_all()

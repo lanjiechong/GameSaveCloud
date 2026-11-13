@@ -147,6 +147,25 @@ def main():
         for d in dialogs:
             d.deleteLater()
 
+    # 回归：ConfirmDialog.ask 曾把 parent 当第 5 个位置参数传进 check_text，
+    # 结果勾选框没有文字、对话框没有父窗口。这里直接调用 ask，把 exec
+    # 换成「读一眼就拒绝」，验证参数确实落到了正确的位置。
+    from PySide6.QtWidgets import QDialog as _QDialog
+    from unittest import mock as _mock
+    cap = {}
+
+    def fake_exec(self):
+        cap["text"] = self.check.text() if self.check else ""
+        cap["parent"] = self.parent()
+        return _QDialog.Rejected
+
+    with _mock.patch.object(_QDialog, "exec", fake_exec):
+        ConfirmDialog.ask("测试", "警告", "明细",
+                          require_check=True, parent=w)
+    check("确认框勾选文字没被 parent 顶掉", bool(cap.get("text")), repr(cap))
+    check("确认框挂上了父窗口", cap.get("parent") is w,
+          repr(cap.get("parent")))
+
     print("== 4. 本地备份模式（默认未配置云端） ==")
     w.refresh_all()
     pump(ms=2000, rounds=4)
@@ -555,6 +574,11 @@ def main():
 
     cfg = w.cfg
     before = bool(cfg.data.get("scan", {}).get("strict_only", False))
+    # 开机自启是写注册表的动作，冒烟里打桩记录调用，绝不真动 HKCU
+    auto_calls = []
+    orig_auto = _SD._apply_autostart
+    _SD._apply_autostart = staticmethod(
+        lambda on: (auto_calls.append(on), on)[1])
     sd = _SD(cfg, parent=w)
     check("设置里有严格模式开关", hasattr(sd, "strict_scan"))
     check("默认关闭", not sd.strict_scan.isChecked())
@@ -566,6 +590,15 @@ def main():
         check("设置 apply 不抛异常", False, repr(e))
     check("严格模式已写进配置",
           cfg.data.get("scan", {}).get("strict_only") is True)
+    # 取消勾选开机自启必须真的调用一次 set_enabled(False)。
+    # 以前写成 `want and _apply_autostart(want)`，False 时短路，删不掉注册表项。
+    sd.autostart.setChecked(True)
+    sd.apply()
+    sd.autostart.setChecked(False)
+    sd.apply()
+    check("开机自启开/关都真的落了动作", auto_calls == [False, True, False],
+          repr(auto_calls))
+    _SD._apply_autostart = orig_auto
     cfg.set("scan.strict_only", before)
     sd.deleteLater()
 
