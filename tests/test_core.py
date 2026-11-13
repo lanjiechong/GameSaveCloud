@@ -31,6 +31,7 @@ from gamesave import gamemeta
 from gamesave import gameindex
 from gamesave import launcher
 from gamesave import relocate
+from gamesave import scanner
 from gamesave.chunker import CHUNK_SIZE
 from gamesave.models import (Game, Snapshot, FileEntry, ChunkRef,
                              RESOLVE_KEEP_LOCAL, RESOLVE_USE_REMOTE,
@@ -1793,6 +1794,76 @@ class TestRestoreGuard(BaseSyncTest):
         self.assertEqual(st["restored"], 1)                 # 第一个目录照常还原
         self.assertEqual(len(st["missing_roots"]), 1)
         self.assertFalse(os.path.exists(second), "缺失的那个不能被创建")
+
+
+# ==================================================================
+# 12. 扫描器：噪音前缀误杀 / 已添加条目回显
+# ==================================================================
+class TestScannerDiscovery(unittest.TestCase):
+    """用临时 LocalLow 搭 <工作室>\<游戏>\Saves 结构，不碰真实 AppData。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gsc_scan_")
+        self.low = os.path.join(self.tmp, "LocalLow")
+        os.makedirs(self.low)
+        self.game_dir = os.path.join(self.low, "TeamSoda", "Duckov")
+        self.saves = os.path.join(self.game_dir, "Saves")
+        os.makedirs(self.saves)
+        write(os.path.join(self.saves, "Save_1.sav"), b"duckov")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _scan(self, known=None):
+        with mock.patch.object(scanner, "_roots",
+                               return_value=[(self.low, "Windows", True)]), \
+                mock.patch.object(scanner, "KNOWN_GAMES", []):
+            return scanner.scan(known_paths=known)
+
+    def test_noise_prefix_does_not_kill_studio_names(self):
+        # "teams" 本意是排除 Microsoft Teams，前缀匹配把 TeamSoda 一起杀了。
+        self.assertFalse(scanner._is_noise_dir("TeamSoda"))
+        self.assertTrue(scanner._is_noise_dir("Teams"))
+        # 放宽之后不能把真正的软件目录放进来
+        self.assertTrue(scanner._is_noise_dir("078助手"))
+        self.assertTrue(scanner._is_noise_dir("gamesir_connect"))
+        self.assertTrue(scanner._is_noise_dir("CrashReportClient"))
+
+    def test_locallow_anchor_not_swallowed_by_local(self):
+        low = scanner._resolve_anchor("X", r"AppData\LocalLow")
+        expect = os.path.normpath(os.path.join(
+            os.environ.get("LOCALAPPDATA", ""), "..", "LocalLow"))
+        self.assertEqual(os.path.normpath(low), expect)
+        wrong = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Low")
+        self.assertNotEqual(os.path.normpath(low), os.path.normpath(wrong))
+
+    def test_duckov_in_known_games(self):
+        self.assertTrue(any("Duckov" in row[0] and "TeamSoda" in row[2][0]
+                            for row in scanner.KNOWN_GAMES))
+
+    def test_two_level_saves_dir_is_discovered(self):
+        found = self._scan()
+        self.assertEqual(len(found), 1)
+        fg = found[0]
+        self.assertEqual(fg.name, "Duckov")
+        self.assertEqual(os.path.normpath(fg.paths[0]),
+                         os.path.normpath(self.game_dir))
+        self.assertFalse(fg.already_added)
+
+    def test_already_added_is_still_reported_and_marked(self):
+        found = self._scan(known=[self.game_dir])
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].already_added)
+
+    def test_parent_dir_covers_child(self):
+        found = self._scan(known=[os.path.join(self.low, "TeamSoda")])
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].already_added)
+
+    def test_child_dir_covers_parent(self):
+        found = self._scan(known=[self.saves])
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].already_added)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
 
 约 6200 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
 
-**当前版本 v1.5.0** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
+**当前版本 v1.5.1** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -68,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 158 个核心引擎单元测试
+python tests/test_core.py                                # 165 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -432,9 +432,19 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
    （已知游戏查表仍然覆盖它们）；
 2. `.txt/.json/.ini/.xml/.cfg` 这类通用扩展名不能作为存档特征 ——
    几乎所有软件都会写这些文件；
-3. 维护一份约 200 项的 `NOISE` 名单。
+3. 维护一份约 200 项的 `NOISE` 名单，分两级：
+   - **技术性前缀**（`cache` / `log` / `crash` / `temp` …）允许前缀匹配，
+     用来杀掉 `CrashReportClient`、`ShaderCache` 这类变体；
+   - 品牌与软件名一律**精确匹配或词边界匹配**。这条是踩坑换来的：
+     原来整个名单都用 `startswith`，`teams`（本意排除 Microsoft Teams）
+     把 Unity 工作室 `TeamSoda` 一起杀掉，逃离鸭科夫的真实存档
+     `LocalLow\TeamSoda\Duckov\Saves` 就此整个漏掉。
 
-结果：203 → 22 → **15 条，且全部为真实存档目录**。
+结果：203 → 22 → **16 条，且全部为真实存档目录**。
+
+已添加过的目录**照样列出**，只是灰显并标「已添加」，不再凭空消失；
+列表项带图标（已添加的游戏用按 game_id 存过的真图标，新游戏用自绘配色图）。
+
 
 ---
 
@@ -459,7 +469,7 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 ## 8. 测试
 
 ```bash
-python tests/test_core.py                  # 158 个单元测试
+python tests/test_core.py                  # 165 个单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 ```
 
@@ -903,6 +913,6 @@ Python 运行时为 PSF）的完整声明、动态链接合规说明与 Qt 可�
 **关于 AI 辅助开发的说明**：本项目在开发过程中使用了 AI 编程助手
 参与代码编写与问题排查。需求取舍、架构设计、安全模型（留底机制、
 三方合并基准、内容哈希判定等）与最终代码均由人类作者审阅、测试并负责；
-全部核心行为由 `tests/test_core.py` 的 158 个单元测试钉住。如发现任何
+全部核心行为由 `tests/test_core.py` 的 165 个单元测试钉住。如发现任何
 疑似侵权内容，请在 [Issues](https://github.com/lanjiechong/GameSaveCloud/issues)
 反馈，核实后立即处理。

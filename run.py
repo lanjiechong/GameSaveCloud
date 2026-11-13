@@ -107,9 +107,10 @@ def _cli(argv):
     if cmd == "scan":
         known = [p for g in vault.list_games() for p in g.paths]
         for fg in scanner.scan(known_paths=known):
+            tail = "  [已添加]" if getattr(fg, "already_added", False) else ""
             print("%-30s %-8s %3d 文件 %-10s %s"
                   % (fg.name[:30], fg.source, fg.files, _h(fg.size),
-                     " / ".join(fg.paths)))
+                     " / ".join(fg.paths) + tail))
         return 0
 
     if cmd == "backup":

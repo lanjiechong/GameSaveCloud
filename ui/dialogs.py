@@ -4,8 +4,8 @@
 """
 import os
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QFont, QColor, QIcon
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QListWidget,
     QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
@@ -182,27 +182,37 @@ class ConflictDialog(QDialog):
 # 添加游戏（扫描结果 + 自定义路径）
 # ==================================================================
 class AddGameDialog(QDialog):
-    def __init__(self, found_games, parent=None):
+    def __init__(self, found_games, logos=None, existing_games=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("添加游戏存档")
-        self.resize(720, 560)
+        self.resize(760, 600)
         self.selected = None
+        self.logos = logos
+        # 已添加的游戏按路径建索引：这些条目能直接用按 game_id 存过的真图标，
+        # 不用退化到按名字猜。
+        self._by_path = {}
+        for g in (existing_games or []):
+            for p in g.paths:
+                self._by_path[os.path.normpath(p).lower()] = g
+
+        # 未添加的排前面 —— 打开这个窗口是为了找「还能加什么」。
+        items = sorted(found_games,
+                       key=lambda f: bool(getattr(f, "already_added", False)))
+        added = sum(1 for f in items
+                    if getattr(f, "already_added", False))
 
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel("扫描到以下可能含存档的目录，勾选后添加："))
+        tip = "扫描到 %d 个可能含存档的目录，勾选后添加：" % len(items)
+        if added:
+            tip += "（其中 %d 个已经添加过，灰色显示）" % added
+        lay.addWidget(QLabel(tip))
 
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.NoSelection)
+        self.list.setIconSize(QSize(40, 40))
         lay.addWidget(self.list)
-        for fg in found_games:
-            src = "查表" if fg.source == "known" else "启发式"
-            text = "%s\n    %s  ·  %d 个文件  ·  %s  ·  %s" % (
-                fg.name, " / ".join(fg.paths), fg.files, _human(fg.size), src)
-            it = QListWidgetItem(text)
-            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Unchecked)
-            it.setData(Qt.UserRole, fg)
-            self.list.addItem(it)
+        for fg in items:
+            self._add_item(fg)
 
         row = QHBoxLayout()
         self.custom = QLineEdit()
@@ -218,9 +228,41 @@ class AddGameDialog(QDialog):
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.button(QDialogButtonBox.Ok).setText("添加勾选项")
+        btns.button(QDialogButtonBox.Cancel).setText("取消")
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
+
+    def _icon_for(self, fg):
+        if not self.logos:
+            return QIcon()
+        g = None
+        for p in fg.paths:
+            g = self._by_path.get(os.path.normpath(p).lower())
+            if g is not None:
+                break
+        pm = (self.logos.pixmap_for_game(g) if g is not None
+              else self.logos.pixmap(fg.name))
+        return QIcon(pm)
+
+    def _add_item(self, fg, custom=False):
+        src = {"known": "查表", "custom": "自定义"}.get(fg.source, "启发式")
+        mark = "  ·  已添加" if getattr(fg, "already_added", False) else ""
+        text = "%s\n    %s  ·  %d 个文件  ·  %s  ·  %s%s" % (
+            fg.name, " / ".join(fg.paths), fg.files, _human(fg.size), src, mark)
+        it = QListWidgetItem(text)
+        it.setIcon(self._icon_for(fg))
+        it.setData(Qt.UserRole, fg)
+        if getattr(fg, "already_added", False):
+            # 不给 checkbox、整行置灰。留着是让人看见「这个加过了」，
+            # 不是让人再勾一次。
+            it.setFlags(Qt.ItemIsEnabled)
+            it.setForeground(QColor(PALETTE["muted"]))
+        else:
+            it.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable
+                        | Qt.ItemIsSelectable)
+            it.setCheckState(Qt.Checked if custom else Qt.Unchecked)
+        self.list.addItem(it)
 
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "选择存档目录")
@@ -234,19 +276,17 @@ class AddGameDialog(QDialog):
             return
         from gamesave.scanner import FoundGame
         fg = FoundGame(os.path.basename(p.rstrip("\\/")), "自定义", [p], 1, 0, "custom")
-        it = QListWidgetItem("%s\n    %s  ·  自定义" % (fg.name, p))
-        it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-        it.setCheckState(Qt.Checked)
-        it.setData(Qt.UserRole, fg)
-        self.list.addItem(it)
+        self._add_item(fg, custom=True)
         self.custom.clear()
 
     def get_selected(self):
         out = []
         for i in range(self.list.count()):
             it = self.list.item(i)
-            if it.checkState() == Qt.Checked:
-                out.append(it.data(Qt.UserRole))
+            fg = it.data(Qt.UserRole)
+            if (fg is not None and not getattr(fg, "already_added", False)
+                    and it.checkState() == Qt.Checked):
+                out.append(fg)
         return out
 
 

@@ -10,7 +10,7 @@ r"""
    子目录报告出来，用于覆盖查表之外的游戏。
 
 去噪规则很重要：大量目录只是缓存/日志/崩溃转储，不报告；
-已经添加过的路径不会重复报告。
+已经添加过的路径照样返回，但打上 already_added 标记，由界面灰显。
 """
 import os
 import sys
@@ -214,6 +214,11 @@ KNOWN_GAMES = [
     ("美德传说", "Steam", ["Tales of Innocence"], "AppData\\Roaming\\Bandai Namco"),
     ("世界传说", "Steam", ["Tales of the World"], "AppData\\Roaming\\Bandai Namco"),
     (" rescue", "独立", ["res"], "AppData\\Roaming"),
+    # Unity 游戏，Company=TeamSoda / Product=Duckov（见安装目录
+    # Duckov_Data\app.info）。存档在 LocalLow\TeamSoda\Duckov\Saves，
+    # 工作名中间层只有 Player.log，启发式容易看走眼，查表钉死更稳。
+    ("逃离鸭科夫 Escape from Duckov", "Steam", ["TeamSoda\\Duckov"],
+     "AppData\\LocalLow"),
 ]
 
 # 存档特征：文件名或扩展名命中这些，就认为该目录可能含存档。
@@ -266,6 +271,28 @@ NOISE = (
     "io.github", "zen", "electron", "tauri", "cef", "chromium",
 )
 
+# 只有这类「技术性前缀」才允许前缀匹配（cache_xxx / CrashReportClient /
+# TempXXX）。品牌与软件名一律精确匹配 —— 之前整个 NOISE 都用 startswith，
+# "teams"（本意排除 Microsoft Teams）把 TeamSoda 一起干掉了，
+# 逃离鸭科夫的真实存档 LocalLow\TeamSoda\Duckov\Saves 就此被整个漏掉。
+NOISE_PREFIX = (
+    "cache", "log", "crash", "temp", "tmp", "shader", "gpucache",
+    "thumbcache", "webcache", "code cache", "minidump", "crashpad",
+    "squirreltemp", "com.example", "io.github", "aclog", "acsdkinslog",
+    "vcredist", "dotnet", "netframework", "078", "gamesir",
+)
+
+
+def _is_noise_dir(name: str) -> bool:
+    low = (name or "").lower()
+    if low in NOISE or any(low.startswith(n) for n in NOISE_PREFIX):
+        return True
+    # 词边界：'teams xxx' / 'teamviewer_2' 仍算噪音，但 'teamsoda' 不是。
+    for n in NOISE:
+        if low.startswith(n) and len(low) > len(n) and low[len(n)] in " _-.":
+            return True
+    return False
+
 
 def _dir_file_count(path: str, max_files: int = 2000) -> tuple:
     """统计目录下普通文件数与总字节（不做存档特征过滤）。查表时用。"""
@@ -273,7 +300,7 @@ def _dir_file_count(path: str, max_files: int = 2000) -> tuple:
     total = 0
     try:
         for r, dirs, fs in os.walk(path):
-            dirs[:] = [d for d in dirs if d.lower() not in NOISE]
+            dirs[:] = [d for d in dirs if not _is_noise_dir(d)]
             for f in fs:
                 try:
                     total += os.path.getsize(os.path.join(r, f))
@@ -293,7 +320,7 @@ def _looks_like_save_dir(path: str, max_files: int = 400) -> tuple:
     total = 0
     try:
         for r, dirs, fs in os.walk(path):
-            dirs[:] = [d for d in dirs if d.lower() not in NOISE]
+            dirs[:] = [d for d in dirs if not _is_noise_dir(d)]
             for f in fs:
                 low = f.lower()
                 if not any(h in low for h in SAVE_HINTS):
@@ -311,37 +338,51 @@ def _looks_like_save_dir(path: str, max_files: int = 400) -> tuple:
 
 
 class FoundGame:
-    def __init__(self, name, platform, paths, files, size, source):
+    def __init__(self, name, platform, paths, files, size, source,
+                 already_added=False):
         self.name = name
         self.platform = platform
         self.paths = paths
         self.files = files
         self.size = size
-        self.source = source      # known / heuristic
+        self.source = source      # known / heuristic / custom
+        self.already_added = already_added
 
     def __repr__(self):
-        return "<FoundGame %s %s %d files>" % (self.name, self.paths, self.files)
+        return "<FoundGame %s %s %d files%s>" % (
+            self.name, self.paths, self.files,
+            " [已添加]" if self.already_added else "")
 
 
 def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
     """扫描本机可备份的存档目录。
 
-    known_paths: 已添加的游戏路径，用于去重，不重复报告。
+    known_paths: 已添加的游戏路径。命中的条目**照样返回**，只打上
+                 already_added 标记 —— 界面要让人看见「哪些加过了」，
+                 而不是让它们凭空消失。
     heuristic:   是否启用通用启发式扫描（查表之外的游戏）。
     """
     known_paths = {os.path.normpath(p).lower() for p in (known_paths or [])}
     found = {}
     order = []
 
+    def covered(paths):
+        """候选与已添加目录，只要一个是另一个的父子，就算已覆盖。"""
+        for p in paths:
+            np = os.path.normpath(p).lower()
+            for k in known_paths:
+                if (np == k or np.startswith(k + os.sep)
+                        or k.startswith(np + os.sep)):
+                    return True
+        return False
+
     def add(name, platform, paths, files, size, source):
         key = tuple(sorted(os.path.normpath(p).lower() for p in paths))
-        if key in found:
+        if key in found or not files:
             return
-        if any(os.path.normpath(p).lower() in known_paths for p in paths):
-            return
-        if not files:
-            return
-        found[key] = FoundGame(name, platform, paths, files, size, source)
+        fg = FoundGame(name, platform, paths, files, size, source)
+        fg.already_added = covered(paths)
+        found[key] = fg
         order.append(key)
 
     # ---------- 1. 查表：路径已知，宽松判定 ----------
@@ -372,8 +413,7 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
             except OSError:
                 continue
             for name in entries:
-                low = name.lower()
-                if low in NOISE or any(low == n or low.startswith(n) for n in NOISE):
+                if _is_noise_dir(name):
                     continue
                 p = os.path.join(root, name)
                 if not os.path.isdir(p):
@@ -391,7 +431,7 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
                     except OSError:
                         subs = []
                     for sub in subs:
-                        if sub.lower() in NOISE:
+                        if _is_noise_dir(sub):
                             continue
                         sp = os.path.join(p, sub)
                         if not os.path.isdir(sp):
@@ -424,13 +464,15 @@ def _resolve_anchor(root: str, anchor: str):
         if a.startswith("AppData\\Roaming"):
             return os.path.join(os.environ.get("APPDATA", ""),
                                 a[len("AppData\\Roaming"):].lstrip("\\"))
-        if a.startswith("AppData\\Local"):
-            return os.path.join(os.environ.get("LOCALAPPDATA", ""),
-                                a[len("AppData\\Local"):].lstrip("\\"))
+        # LocalLow 必须先判：'AppData\LocalLow' 同样以 'AppData\Local'
+        # 开头，放后面会被吞成 LOCALAPPDATA\Low（一个不存在的目录）。
         if a.startswith("AppData\\LocalLow"):
             low = os.path.normpath(os.path.join(os.environ.get("LOCALAPPDATA", ""),
                                                 "..", "LocalLow"))
             return os.path.join(low, a[len("AppData\\LocalLow"):].lstrip("\\"))
+        if a.startswith("AppData\\Local"):
+            return os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                                a[len("AppData\\Local"):].lstrip("\\"))
         if a.startswith("Documents"):
             return os.path.join(home, "Documents",
                                 a[len("Documents"):].lstrip("\\"))

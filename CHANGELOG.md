@@ -3,6 +3,37 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.5.1] - 2026-11-13
+
+### 新增
+
+- **添加游戏对话框：已添加的照样列出** —— 灰显、标「已添加」、不给勾选框，
+  未添加的排在前面。之前它们被 `known_paths` 直接过滤掉，用户看不出到底
+  扫没扫到。
+- **列表带图标** —— 已添加的游戏用按 `game_id` 落盘的真实图标，新游戏用
+  程序自绘的配色图；添加进库后由 MetaService 自动补真图。
+- 逃离鸭科夫加入查表（`LocalLow\TeamSoda\Duckov`），以中文名显示。
+- 命令行 `scan` 对已添加条目加 `[已添加]` 标记。
+
+### 修复
+
+- **NOISE 前缀误杀（逃离鸭科夫扫不到的根因）**：整个名单都用
+  `startswith`，其中 `teams`（本意排除 Microsoft Teams）把 Unity 工作室
+  `TeamSoda` 一起杀掉，真实存档 `LocalLow\TeamSoda\Duckov\Saves` 就此
+  整个漏掉。改成技术性词才允许前缀匹配、品牌名精确或词边界匹配。
+  实测 16 条结果，无新增噪音。
+- **`_resolve_anchor` 分支顺序**：`AppData\Local` 排在 `AppData\LocalLow`
+  前面，后者被吞成 `AppData\Local\Low`（不存在的目录）—— 所有以
+  LocalLow 为锚的查表条目其实一直没生效。
+- 对话框的 Cancel 按钮改成「取消」。
+
+### 测试
+
+- 单测 158 → 165，新增扫描器 7 条：噪音两级匹配、锚点解析、两级
+  `Saves` 目录发现、已添加回显、父子路径互为覆盖、查表条目存在。
+- 冒烟新增第 12 节：排序 / 已添加标记 / 不可勾选 / 两项都有图标 /
+  `get_selected` 只返回未添加项。
+
 ## [1.5.0] - 2026-11-02
 
 还原这件事之前只做对了一半：覆盖前留了底，但那份底不是快照 —— 历史里看不见，
@@ -279,6 +310,7 @@
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.5.1]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.1
 [1.5.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.0
 [1.4.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.4.0
 [1.3.2]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.3.2

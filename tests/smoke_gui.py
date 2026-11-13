@@ -514,6 +514,39 @@ def main():
     finally:
         ConfirmDialog.ask = orig_ask
 
+    # ================================================================
+    print("== 12. 添加游戏对话框：图标 / 已添加灰显 ==")
+    # ================================================================
+    from ui.dialogs import AddGameDialog as _AGD
+    from gamesave.scanner import FoundGame as _FG
+    from PySide6.QtCore import Qt as _Qt2
+
+    dd1 = os.path.join(TMP, "dlg1", "saves")
+    dd2 = os.path.join(TMP, "dlg2", "saves")
+    os.makedirs(dd1)
+    os.makedirs(dd2)
+    eg = w.vault.add_game("ExistingOne", [dd1])
+    fresh = _FG("FreshOne", "Windows", [dd2], 2, 100, "heuristic")
+    exist = _FG("ExistingOne", "Windows", [dd1], 1, 50, "known",
+                already_added=True)
+    dlg = _AGD([exist, fresh], logos=w.logos, existing_games=[eg], parent=w)
+    first = dlg.list.item(0)
+    second = dlg.list.item(1)
+    check("未添加的排在最前", first.data(_Qt2.UserRole).name == "FreshOne")
+    check("已添加的仍在列表里", second.data(_Qt2.UserRole).already_added)
+    check("已添加文字带标记", "已添加" in second.text())
+    check("已添加项不可勾选",
+          not bool(second.flags() & _Qt2.ItemIsUserCheckable))
+    check("未添加项有勾选框",
+          bool(first.flags() & _Qt2.ItemIsUserCheckable))
+    check("两项都有图标",
+          not first.icon().isNull() and not second.icon().isNull())
+    first.setCheckState(_Qt2.Checked)
+    picked = dlg.get_selected()
+    check("只返回未添加的勾选项",
+          len(picked) == 1 and picked[0].name == "FreshOne", repr(picked))
+    dlg.deleteLater()
+
     # --- 汇总 ---
     print()
     if FAILS:

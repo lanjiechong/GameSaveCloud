@@ -1005,17 +1005,22 @@ class MainWindow(QMainWindow):
     # ---------- 添加 / 移除 ----------
     def add_game(self):
         self._set_busy(True, "正在扫描本机存档目录…")
-        known = [p for g in self.vault.list_games() for p in g.paths]
+        existing = self.vault.list_games()
+        known = [p for g in existing for p in g.paths]
 
         def job(sig):
             return scanner.scan(known_paths=known)
 
         def done(found):
             self._set_busy(False)
-            if not found:
+            fresh = [f for f in found if not getattr(f, "already_added", False)]
+            if not fresh:
                 msgbox.info(self, "没有发现",
-                                        "没有扫描到新的存档目录，可用「添加自定义」手动指定。")
-            dlg = AddGameDialog(found, self)
+                            "没有扫描到新的存档目录，可用「添加自定义」手动指定。")
+            # 已添加的照样传进去，对话框里灰显并标「已添加」——
+            # 让它们凭空消失，用户不知道到底扫没扫到。
+            dlg = AddGameDialog(found, logos=self.logos,
+                                existing_games=existing, parent=self)
             if dlg.exec() != AddGameDialog.Accepted:
                 return
             picked = dlg.get_selected()
