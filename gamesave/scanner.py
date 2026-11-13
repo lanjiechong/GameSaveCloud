@@ -434,13 +434,18 @@ class FoundGame:
             " [已添加]" if self.already_added else "")
 
 
-def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
+def scan(known_paths=None, heuristic=True, max_depth=3,
+         strict_only: bool = False) -> list:
     """扫描本机可备份的存档目录。
 
     known_paths: 已添加的游戏路径。命中的条目**照样返回**，只打上
                  already_added 标记 —— 界面要让人看见「哪些加过了」，
                  而不是让它们凭空消失。
     heuristic:   是否启用通用启发式扫描（查表之外的游戏）。
+    strict_only: 严格模式。只认查表 + 本机已安装游戏清单 / 随包离线索引
+                 能对上名字的启发式结果，连「游戏专用根」和 Unity 运行时
+                 证据都不豁免。代价是会漏掉清单外的独立小游戏，换来
+                 「绝不把非游戏报成游戏」。
     """
     known_paths = {os.path.normpath(p).lower() for p in (known_paths or [])}
     found = {}
@@ -494,8 +499,23 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
             # 这些根天然可信。AppData\Roaming 里塞的都是普通软件，
             # 目录名必须对得上已安装游戏，或现场有游戏运行时证据。
             rl = root.lower()
-            trusted = (_is_locallow(root) or "saved games" in rl
-                       or "my games" in rl)
+            drill = _is_locallow(root)
+            # 严格模式下没有任何「天然可信」的根，全部要对清单。
+            trusted = (not strict_only) and (
+                drill or "saved games" in rl or "my games" in rl)
+
+            def allowed(label, path):
+                # 用户亲手添加过的目录天然可信：严格模式下也要灰显出来，
+                # 否则「已添加的照样列出」这条就被严格模式打破了。
+                if covered([path]):
+                    return True
+                if strict_only:
+                    return _confirmed_game(label, catalog)
+                if trusted:
+                    return True
+                return (_confirmed_game(label, catalog)
+                        or _has_game_runtime(path))
+
             try:
                 entries = sorted(os.listdir(root))
             except OSError:
@@ -506,8 +526,9 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
                 p = os.path.join(root, name)
                 if not os.path.isdir(p) or _is_app_data_dir(p):
                     continue
-                if not trusted and not (_confirmed_game(name, catalog)
-                                       or _has_game_runtime(p)):
+                # LocalLow 一级是工作室名（AIHASTO / TeamSoda），拿去对
+                # 游戏清单必然不中；验证要放到下钻后的游戏目录上。
+                if not drill and not allowed(name, p):
                     continue
                 # LocalLow 的布局是 <工作室>\<游戏>。工作室那一层不是游戏名 ——
                 # 拿「AIHASTO」「House House」去 Steam 搜一条都搜不到，
@@ -515,8 +536,7 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
                 # 游戏目录，找到就不再把这个工作室名当游戏。
                 # 只对 LocalLow 下钻：AppData 下面同样是「厂商\产品」结构，
                 # 但那里的厂商目录里塞的是各种软件，下钻只会扫出更多噪音。
-                if _is_locallow(root):
-                    got_sub = False
+                if drill:
                     try:
                         subs = sorted(os.listdir(p))
                     except OSError:
@@ -527,12 +547,15 @@ def scan(known_paths=None, heuristic=True, max_depth=3) -> list:
                         sp = os.path.join(p, sub)
                         if not os.path.isdir(sp) or _is_app_data_dir(sp):
                             continue
+                        if not allowed(sub, sp):
+                            continue
                         f2, s2 = _looks_like_save_dir(sp, max_files=60)
                         if f2:
                             add(sub, tag, [sp], f2, s2, "heuristic")
-                            got_sub = True
-                    if got_sub:
-                        continue
+                    # 无论下钻有没有结果，都不把工作室名当游戏报。
+                    # 严格模式下子目录可能全被清单挡掉，这时若回退到
+                    # 一级目录，就会冒出 AIHASTO / TeamSoda 这类假游戏。
+                    continue
                 files, size = _looks_like_save_dir(p, max_files=60)
                 if files:
                     add(name, tag, [p], files, size, "heuristic")

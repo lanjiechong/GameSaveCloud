@@ -182,7 +182,8 @@ class ConflictDialog(QDialog):
 # 添加游戏（扫描结果 + 自定义路径）
 # ==================================================================
 class AddGameDialog(QDialog):
-    def __init__(self, found_games, logos=None, existing_games=None, parent=None):
+    def __init__(self, found_games, logos=None, existing_games=None,
+                 strict_only=False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("添加游戏存档")
         self.resize(760, 600)
@@ -206,6 +207,13 @@ class AddGameDialog(QDialog):
         if added:
             tip += "（其中 %d 个已经添加过，灰色显示）" % added
         lay.addWidget(QLabel(tip))
+        if strict_only:
+            note = QLabel("严格模式：只列出查表命中、或能对上本机已安装游戏清单"
+                          "与离线索引的目录。清单外的独立游戏不会显示，"
+                          "请用下方「添加自定义」手动指定。")
+            note.setWordWrap(True)
+            note.setStyleSheet("color:%s;" % PALETTE["muted"])
+            lay.addWidget(note)
 
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.NoSelection)
@@ -514,6 +522,19 @@ class SettingsDialog(QDialog):
         f4.addRow("", self.confirm_danger)
         lay.addWidget(g4)
 
+        # 扫描
+        g5 = QGroupBox("存档目录扫描")
+        f5 = QFormLayout(g5)
+        self.strict_scan = QCheckBox("严格模式：只扫描已确认的游戏")
+        self.strict_scan.setChecked(bool(d.get("scan", {}).get("strict_only")))
+        f5.addRow("", self.strict_scan)
+        f5.addRow("", QLabel(
+            "开启后只显示：内置查表中的游戏，以及能对上本机 Steam / Epic "
+            "已安装清单或内置离线索引的目录。\n"
+            "不会把加速器、启动器等软件误报成游戏，但会漏掉清单外的"
+            "独立小游戏 —— 那些请用「添加自定义」手动指定。"))
+        lay.addWidget(g5)
+
         self._btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self._btns.accepted.connect(self._validate_accept)
         self._btns.rejected.connect(self.reject)
@@ -574,7 +595,8 @@ class SettingsDialog(QDialog):
               want_autostart and self._apply_autostart(want_autostart))
         c.set("safety.keep_local_copy", self.keep_copy.isChecked())
         c.set("safety.keep_snapshots", self.keep_snaps.value())
-        c.set("safety.confirm_dangerous", self.confirm_dangerous.isChecked())
+        c.set("safety.confirm_dangerous", self.confirm_danger.isChecked())
+        c.set("scan.strict_only", self.strict_scan.isChecked())
 
     @staticmethod
     def _apply_autostart(on: bool) -> bool:

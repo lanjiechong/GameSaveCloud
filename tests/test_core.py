@@ -17,6 +17,7 @@
 import os
 import shutil
 import sys
+import contextlib
 import tempfile
 import time
 import unittest
@@ -1943,6 +1944,75 @@ class TestGameIdentity(unittest.TestCase):
         self.assertFalse(scanner._has_game_runtime(d))
         write(os.path.join(d, "Player.log"), b"log")
         self.assertTrue(scanner._has_game_runtime(d))
+
+
+# ==================================================================
+# 14. 严格模式：只认查表 + 游戏清单，绝不为覆盖而猜
+# ==================================================================
+class TestStrictMode(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gsc_strict_")
+        self.low = os.path.join(self.tmp, "LocalLow")
+        os.makedirs(self.low)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _game(self, name, unity=False):
+        p = os.path.join(self.low, "Studio", name)
+        os.makedirs(p)
+        if unity:
+            write(os.path.join(p, "Player.log"), b"log")
+        write(os.path.join(p, "save.sav"), b"x" * 100)
+        return p
+
+    def _scan(self, strict, catalog=None, known_games=None, anchors=None,
+              known=None):
+        ctx = [mock.patch.object(scanner, "_roots",
+                                 return_value=[(self.low, "Windows", True)]),
+               mock.patch.object(scanner, "KNOWN_GAMES", known_games or []),
+               mock.patch.object(scanner, "_game_catalog",
+                                 return_value=catalog or set())]
+        if anchors is not None:
+            ctx.append(mock.patch.object(scanner, "_resolve_anchor",
+                                         return_value=anchors))
+        with contextlib.ExitStack() as stack:
+            for c in ctx:
+                stack.enter_context(c)
+            return scanner.scan(known_paths=known or [], strict_only=strict)
+
+    def test_strict_drops_unlisted_game_even_with_unity_log(self):
+        self._game("IndieGame", unity=True)
+        self.assertEqual(len(self._scan(False)), 1)
+        self.assertEqual(self._scan(True), [])
+
+    def test_strict_keeps_catalog_match(self):
+        self._game("RealGame")
+        out = self._scan(True, catalog={"realgame"})
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].name, "RealGame")
+
+    def test_strict_never_reports_studio_name(self):
+        """下钻全被挡掉时不许回退把工作室名当游戏报（回归）。"""
+        self._game("Duckov", unity=True)
+        out = self._scan(True)
+        self.assertEqual(out, [])
+        self.assertFalse(any(x.name == "Studio" for x in out))
+
+    def test_strict_still_shows_already_added(self):
+        """不在清单里，但用户亲手加过 —— 灰显出来，不能凭空消失。"""
+        p = self._game("IndieGame", unity=True)
+        out = self._scan(True, known=[p])
+        self.assertEqual(len(out), 1)
+        self.assertTrue(out[0].already_added)
+
+    def test_strict_still_keeps_known_games(self):
+        p = self._game("KnownGame")
+        kg = [("查表游戏", "Steam", ["Studio\\KnownGame"], "AppData\\LocalLow")]
+        out = self._scan(True, known_games=kg, anchors=self.low)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].source, "known")
+        self.assertTrue(os.path.isdir(p))
 
 
 if __name__ == "__main__":

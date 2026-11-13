@@ -58,6 +58,12 @@ class Config:
                 "keep_snapshots": 30,              # 每款游戏最多保留多少快照
                 "confirm_dangerous": True,         # 危险操作二次确认
             },
+            "scan": {
+                # 严格模式：只认查表 + 本机已安装游戏清单/离线索引能对上
+                # 名字的结果，游戏专用根和 Unity 运行时证据都不豁免。
+                # 默认关 —— 打开会漏掉清单外的独立小游戏。
+                "strict_only": False,
+            },
             "metadata": {
                 # 中文名补充源。主源永远是 Steam；Bangumi 只在 Steam 查到
                 # 游戏但没给中文名时补一手，前提是能访问 api.bgm.tv

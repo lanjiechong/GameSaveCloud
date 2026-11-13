@@ -547,6 +547,33 @@ def main():
           len(picked) == 1 and picked[0].name == "FreshOne", repr(picked))
     dlg.deleteLater()
 
+    # ================================================================
+    print("== 13. 严格模式开关 ==")
+    # ================================================================
+    from ui.dialogs import SettingsDialog as _SD, AddGameDialog as _AGD2
+    from PySide6.QtWidgets import QLabel as _QLabel
+
+    cfg = w.cfg
+    before = bool(cfg.data.get("scan", {}).get("strict_only", False))
+    sd = _SD(cfg, parent=w)
+    check("设置里有严格模式开关", hasattr(sd, "strict_scan"))
+    check("默认关闭", not sd.strict_scan.isChecked())
+    sd.strict_scan.setChecked(True)
+    try:
+        sd.apply()
+        check("设置 apply 不抛异常", True)
+    except Exception as e:      # noqa: BLE001
+        check("设置 apply 不抛异常", False, repr(e))
+    check("严格模式已写进配置",
+          cfg.data.get("scan", {}).get("strict_only") is True)
+    cfg.set("scan.strict_only", before)
+    sd.deleteLater()
+
+    dlg2 = _AGD2([], logos=w.logos, strict_only=True, parent=w)
+    labels = [c.text() for c in dlg2.findChildren(_QLabel)]
+    check("严格模式对话框有说明", any("严格模式" in t for t in labels))
+    dlg2.deleteLater()
+
     # --- 汇总 ---
     print()
     if FAILS:

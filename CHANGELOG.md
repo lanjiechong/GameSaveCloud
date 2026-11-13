@@ -3,6 +3,40 @@
 本项目的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.5.3] - 2026-11-14
+
+严格模式（设置 → 存档目录扫描），按上一版末尾提的方案落地。
+
+### 新增
+
+- `scan(strict_only=True)`：启发式只认能对上本机 Steam / Epic 已安装清单
+  或随包离线索引的目录。游戏专用根（`LocalLow` / `My Games` /
+  `Saved Games`）和 Unity `Player.log` 都不再豁免。
+- 配置项 `scan.strict_only`，默认**关**。老配置经 `Config._merge`
+  自动补上这个键，不用手动改。
+- 设置窗口新增「存档目录扫描」分组；严格模式下扫描为空时提示改成
+  「严格模式下没有对得上游戏清单的新目录」，不再误导成扫描失败。
+- 添加对话框在严格模式下显示说明；命令行 `scan` 跟随开关并标注模式。
+- 已添加的目录与查表条目在严格模式下照常显示 —— 两者都是人确认过的，
+  不能被清单挡掉。
+
+### 修复
+
+- **严格模式暴露的回退 bug**：`LocalLow` 下钻的子目录被清单挡掉后，
+  原逻辑会回退把一级的**工作室名当游戏**报出来（`AIHASTO`、
+  `TeamSoda`、`Two Point Studios`…）。改成下钻后无条件跳过一级目录。
+- **设置窗口点「确定」会崩**：`apply()` 里访问 `self.confirm_dangerous`，
+  控件实际叫 `self.confirm_danger`，直接 AttributeError。冒烟以前只
+  构造不 apply，所以一直没发现；第 13 节补上真实 apply 调用。
+
+### 代价与实测
+
+本机 15 条 → 严格 6 条（4 条查表 + Big Walk / Pummel Party），
+清单外的 9 款独立游戏不再出现，用「添加自定义」指定。
+带真实库路径扫描：普通 15 条 / 严格 14 条，13 条已添加全部灰显保留。
+
+单测 173 → 178（新增 5 条），冒烟新增第 13 节。
+
 ## [1.5.2] - 2026-11-13
 
 要求把 ACLOS 加速器直接排除，且「以后都不能出现这种加速器扫描出来的情况，
@@ -346,6 +380,7 @@ ACLOS 唯一命中的是 `GameProxyCrashReports\xxx.run.lock`——一个 **0 �
   对话框构造、本地/云端两条同步链路、无 logo 包时的图标兜底
 - 危险操作边界由「一被调用就抛 AssertionError」的假后端测试守住
 
+[1.5.3]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.3
 [1.5.2]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.2
 [1.5.1]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.1
 [1.5.0]: https://github.com/lanjiechong/GameSaveCloud/releases/tag/v1.5.0

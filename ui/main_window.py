@@ -1007,20 +1007,25 @@ class MainWindow(QMainWindow):
         self._set_busy(True, "正在扫描本机存档目录…")
         existing = self.vault.list_games()
         known = [p for g in existing for p in g.paths]
+        strict = bool(self.cfg.data.get("scan", {}).get("strict_only", False))
 
         def job(sig):
-            return scanner.scan(known_paths=known)
+            return scanner.scan(known_paths=known, strict_only=strict)
 
         def done(found):
             self._set_busy(False)
             fresh = [f for f in found if not getattr(f, "already_added", False)]
             if not fresh:
                 msgbox.info(self, "没有发现",
+                            "严格模式下没有对得上游戏清单的新目录。\n"
+                            "可用「添加自定义」手动指定，或在「设置 → 存档目录扫描」"
+                            "里关掉严格模式。" if strict else
                             "没有扫描到新的存档目录，可用「添加自定义」手动指定。")
             # 已添加的照样传进去，对话框里灰显并标「已添加」——
             # 让它们凭空消失，用户不知道到底扫没扫到。
             dlg = AddGameDialog(found, logos=self.logos,
-                                existing_games=existing, parent=self)
+                                existing_games=existing, strict_only=strict,
+                                parent=self)
             if dlg.exec() != AddGameDialog.Accepted:
                 return
             picked = dlg.get_selected()

@@ -5,7 +5,7 @@
 
 约 6200 行，PySide6 界面 + 标准库后端，零强制第三方依赖（`zstandard` 仅为可选加速）。
 
-**当前版本 v1.5.2** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
+**当前版本 v1.5.3** —— 下载与更新日志见 [Releases](https://github.com/lanjiechong/GameSaveCloud/releases) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 **许可证：[MIT](LICENSE)** —— 可自由使用、修改与再分发；第三方组件与游戏商标声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -68,7 +68,7 @@ python run.py --cli status       # 命令行（注意要带 --cli 前缀）
 ### 跑测试
 
 ```bash
-python tests/test_core.py                                # 173 个核心引擎单元测试
+python tests/test_core.py                                # 178 个核心引擎单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py      # GUI 离屏冒烟测试
 ```
 
@@ -96,7 +96,7 @@ spec 的 `datas` **只打包应用自己的图标**（app_logo.ico/png），
 
 | # | 需求 | 实现位置 |
 |---|------|---------|
-| 1 | 自动扫描常见存档目录 + 手动添加自定义路径 | `gamesave/scanner.py`（150 款已知游戏查表 + 启发式扫描），`ui/dialogs.py::AddGameDialog` |
+| 1 | 自动扫描常见存档目录 + 手动添加自定义路径（可选严格模式） | `gamesave/scanner.py`（已知游戏查表 + 启发式 + 游戏身份验证），`ui/dialogs.py::AddGameDialog` |
 | 2 | 上传/下载/增量同步、压缩、去重、断点续传 | `gamesave/chunker.py` + `gamesave/store.py` + `gamesave/remote.py` + `gamesave/sync.py` |
 | 3 | 版本历史、查看、对比、一键还原 | `gamesave/vault.py::restore_snapshot`（`pre_backup` 还原前整份备份当前档位），`HistoryDialog` / `DiffDialog` |
 | 4 | 冲突检测与三选一处理 | `gamesave/sync.py::_decide`，`ConflictDialog` |
@@ -466,6 +466,17 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 已添加过的目录**照样列出**，只是灰显并标「已添加」，不再凭空消失；
 列表项带图标（已添加的游戏用按 game_id 存过的真图标，新游戏用自绘配色图）。
 
+### 6.7 严格模式
+
+「设置 → 存档目录扫描 → 严格模式」打开后，启发式只认**能对上本机
+Steam / Epic 已安装清单或随包离线索引**的目录，`LocalLow` 这类游戏专用根
+和 Unity `Player.log` 都不再豁免。代价是清单外的独立小游戏会被漏掉
+（本机实测 15 → 6 条），换来「绝不把非游戏报成游戏」—— 这类游戏用
+「添加自定义」手动指定即可。
+
+两个不受影响的例外：查表条目（人工确认过）和**已添加的目录**（用户
+亲手确认过，仍灰显列出）。命令行 `scan` 跟随同一个开关，并在输出顶部
+标注当前模式。
 
 ---
 
@@ -490,7 +501,7 @@ chunk 一律先写 `.part` 再 `os.replace()` 改名。`os.replace` 在同盘是
 ## 8. 测试
 
 ```bash
-python tests/test_core.py                  # 173 个单元测试
+python tests/test_core.py                  # 178 个单元测试
 QT_QPA_PLATFORM=offscreen python tests/smoke_gui.py
 ```
 
@@ -934,6 +945,6 @@ Python 运行时为 PSF）的完整声明、动态链接合规说明与 Qt 可�
 **关于 AI 辅助开发的说明**：本项目在开发过程中使用了 AI 编程助手
 参与代码编写与问题排查。需求取舍、架构设计、安全模型（留底机制、
 三方合并基准、内容哈希判定等）与最终代码均由人类作者审阅、测试并负责；
-全部核心行为由 `tests/test_core.py` 的 173 个单元测试钉住。如发现任何
+全部核心行为由 `tests/test_core.py` 的 178 个单元测试钉住。如发现任何
 疑似侵权内容，请在 [Issues](https://github.com/lanjiechong/GameSaveCloud/issues)
 反馈，核实后立即处理。

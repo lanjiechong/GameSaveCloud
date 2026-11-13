@@ -106,7 +106,10 @@ def _cli(argv):
 
     if cmd == "scan":
         known = [p for g in vault.list_games() for p in g.paths]
-        for fg in scanner.scan(known_paths=known):
+        strict = bool(cfg.data.get("scan", {}).get("strict_only", False))
+        if strict:
+            print("[严格模式] 只显示查表命中与能对上已安装游戏清单的目录")
+        for fg in scanner.scan(known_paths=known, strict_only=strict):
             tail = "  [已添加]" if getattr(fg, "already_added", False) else ""
             print("%-30s %-8s %3d 文件 %-10s %s"
                   % (fg.name[:30], fg.source, fg.files, _h(fg.size),
